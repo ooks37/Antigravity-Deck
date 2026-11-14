@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { Check, X, Sparkles, CircleDot, Bot, Settings, Globe, Camera, Star, Bell, Terminal, RefreshCw, Download, FileText, Loader2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { ProxyPanel } from './proxy-panel';
+import { PermissionsPanel } from './permissions-panel';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -568,6 +569,9 @@ export function SettingsView() {
                         </p>
                     </CardContent>
                 </Card>
+
+                {/* Agent Permissions & Persistent Service */}
+                <PermissionsPanel />
 
                 {/* SOCKS5h / HTTP Proxy Pool */}
                 <ProxyPanel />

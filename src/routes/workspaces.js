@@ -1,7 +1,6 @@
 // === Workspace Routes ===
 // /api/workspaces/* (CRUD, resources, folders)
 
-const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { getHub, ensureWorkspaceTracked, init } = require('../detector');
@@ -124,19 +123,8 @@ module.exports = function setupWorkspacesRoutes(app) {
         // or not the GUI is shown — we never block on a new per-workspace LS process.
         const launchIde = () => {
             try {
-                const { getChildProcessEnv, getChromiumProxyArgs } = require('../proxy-manager');
-                const childEnv = getChildProcessEnv(process.env);
-                const proxyArgs = getChromiumProxyArgs();
-                if (platform === 'darwin') {
-                    const openArgs = proxyArgs.length ? ['-a', 'Antigravity', folderPath, '--args', ...proxyArgs] : ['-a', 'Antigravity', folderPath];
-                    const child = spawn('open', openArgs, { timeout: 10000, detached: true, stdio: 'ignore', env: childEnv });
-                    child.on('error', (err) => console.error('[!] Failed to open Antigravity:', err.message));
-                    child.unref();
-                } else {
-                    const child = spawn('antigravity', ['--trust-workspace', folderPath, ...proxyArgs], { timeout: 10000, detached: true, stdio: 'ignore', shell: platform === 'win32', env: childEnv });
-                    child.on('error', (err) => console.error('[!] Failed to launch antigravity:', err.message));
-                    child.unref();
-                }
+                const { launchDesktopIde } = require('../ide-launcher');
+                launchDesktopIde({ workspacePath: folderPath });
             } catch (e) {
                 console.error('[!] IDE launch error:', e.message);
             }

@@ -703,4 +703,72 @@ export async function testProxyNode(payload: { id?: string } | ProxyNodeInput): 
     return apiJson(`${API_BASE}/api/proxy/test`, { method: 'POST', body: JSON.stringify(payload) }, '测试代理连通性失败');
 }
 
+// === Permissions & Antigravity Daemon Control ===
+export type AgentMode = 'default' | 'accept-edits' | 'auto' | 'plan';
+export type ToolPermission = 'request-review' | 'proceed-in-sandbox' | 'always-proceed' | 'strict';
+export type ArtifactReviewPolicy = 'asks-for-review' | 'agent-decides' | 'always-proceed';
+export type PermissionPresetName = 'strict' | 'default' | 'accept-edits' | 'auto' | 'turbo';
+
+export interface CliPermissionsConfig {
+    agentMode: AgentMode;
+    toolPermission: ToolPermission;
+    artifactReviewPolicy: ArtifactReviewPolicy;
+    allowNonWorkspaceAccess: boolean;
+    enableTerminalSandbox: boolean;
+    permissions: {
+        allow: string[];
+        ask: string[];
+        deny: string[];
+    };
+}
+
+export interface PermissionConfigState {
+    autoAccept: boolean;
+    settingsPath: string;
+    fileExists: boolean;
+    parseError: string | null;
+    lsConnected?: boolean;
+    presetApplied?: PermissionPresetName;
+    cli: CliPermissionsConfig;
+}
+
+export interface IdeRuntimeStatus {
+    lsDetected: boolean;
+    port: number | null;
+    ideInstalled: boolean;
+    ideRunning: boolean;
+    pm2Managed: boolean;
+    platform: string;
+}
+
+export async function getPermissionsConfig(): Promise<PermissionConfigState> {
+    return apiJson<PermissionConfigState>(`${API_BASE}/api/permissions`, undefined, '获取权限设置失败');
+}
+
+export async function updatePermissionsConfig(payload: {
+    autoAccept?: boolean;
+    cli?: Partial<CliPermissionsConfig>;
+}): Promise<PermissionConfigState> {
+    return apiJson<PermissionConfigState>(`${API_BASE}/api/permissions`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '保存权限设置失败');
+}
+
+export async function applyPermissionPreset(preset: PermissionPresetName): Promise<PermissionConfigState> {
+    return apiJson<PermissionConfigState>(`${API_BASE}/api/permissions/preset`, {
+        method: 'POST',
+        body: JSON.stringify({ preset }),
+    }, '应用权限预设失败');
+}
+
+export async function getIdeRuntimeStatus(): Promise<IdeRuntimeStatus> {
+    return apiJson<IdeRuntimeStatus>(`${API_BASE}/api/ide/status`, undefined, '获取 Antigravity 服务状态失败');
+}
+
+export async function restartIdeService(): Promise<{ restarted: boolean; managedBy: string; platform: string }> {
+    return apiJson(`${API_BASE}/api/ide/restart`, { method: 'POST' }, '重启 Antigravity 服务失败');
+}
+
+
 

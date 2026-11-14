@@ -34,6 +34,9 @@ module.exports = function setupSettingsRoutes(app) {
             const validated = SettingsSchema.parse(req.body);
             const { saveSettings } = require('../config');
             const updated = saveSettings(validated);
+            if (validated.autoAccept !== undefined) {
+                require('../auto-accept').setAutoAccept(validated.autoAccept);
+            }
             console.log(`[*] Settings updated:`, JSON.stringify(updated));
             res.json(updated);
         } catch (error) {

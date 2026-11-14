@@ -1,8 +1,9 @@
 // === System Routes ===
-// /api/status, /api/launch-ide, /api/kill-ide
+// /api/status, /api/ide/status, /api/ide/restart, /api/launch-ide, /api/kill-ide
 // NOTE: GET /api/ws-url is intentionally NOT here — it lives in server.js (before auth middleware)
 
-const { spawn } = require('child_process');
+const { exec } = require('child_process');
+const { hasPm2HubApp, restartManagedIde, launchDesktopIde } = require('../ide-launcher');
 
 // Private helper — get parent PID of a process (cross-platform)
 // Only used by /api/kill-ide handler below
@@ -33,41 +34,56 @@ module.exports = function setupSystemRoutes(app) {
         res.json({ detected: lsConfig.detected, port: lsConfig.port || null });
     });
 
-    // Launch IDE — fire-and-forget, opens the Antigravity IDE application
-    // Security: no user input, rate-limited via strictLimiter in server.js, auth-protected
-    app.post('/api/launch-ide', (req, res) => {
+    // Runtime IDE + Daemon status (for UI daemon status bar)
+    app.get('/api/ide/status', async (req, res) => {
+        const { platform, lsConfig } = require('../config');
+        const { detectIdeInstalled, detectIdeRunning } = require('../profile-manager');
+        try {
+            const [ideInstalled, ideRunning, pm2Managed] = await Promise.all([
+                detectIdeInstalled().catch(() => false),
+                detectIdeRunning().catch(() => false),
+                hasPm2HubApp().catch(() => false),
+            ]);
+            res.json({
+                lsDetected: Boolean(lsConfig.detected),
+                port: lsConfig.port || null,
+                ideInstalled,
+                ideRunning,
+                pm2Managed,
+                platform,
+            });
+        } catch (e) {
+            res.status(500).json({ error: e.message || 'Failed to inspect IDE status' });
+        }
+    });
+
+    // Restart IDE / PM2 antigravity-hub cleanly (e.g. after switching SOCKS5h proxy node)
+    app.post('/api/ide/restart', async (req, res) => {
         const { platform } = require('../config');
-        const { getChildProcessEnv, getChromiumProxyArgs } = require('../proxy-manager');
+        try {
+            if (await restartManagedIde()) {
+                return res.json({ restarted: true, managedBy: 'pm2', platform });
+            }
+            const launched = launchDesktopIde();
+            return res.json({ restarted: launched, managedBy: 'spawn', platform });
+        } catch (e) {
+            console.error('[!] Restart IDE error:', e.message);
+            res.status(500).json({ error: e.message || 'Failed to restart IDE' });
+        }
+    });
+
+    // Launch IDE — fire-and-forget, opens or restarts the Antigravity IDE application
+    // Security: no user input, rate-limited via strictLimiter in server.js, auth-protected
+    app.post('/api/launch-ide', async (req, res) => {
+        const { platform } = require('../config');
         console.log(`[*] Launch IDE requested (platform: ${platform})`);
 
         try {
-            const childEnv = getChildProcessEnv(process.env);
-            const proxyArgs = getChromiumProxyArgs();
-            if (platform === 'darwin') {
-                // macOS: open Antigravity app
-                const openArgs = proxyArgs.length ? ['-a', 'Antigravity', '--args', ...proxyArgs] : ['-a', 'Antigravity'];
-                const child = spawn('open', openArgs, {
-                    timeout: 10000,
-                    detached: true,
-                    stdio: 'ignore',
-                    env: childEnv,
-                });
-                child.on('error', (e) => console.error('[!] Failed to open Antigravity:', e.message));
-                child.unref();
-            } else {
-                // Windows/Linux
-                const child = spawn('antigravity', proxyArgs, {
-                    timeout: 10000,
-                    detached: true,
-                    stdio: 'ignore',
-                    shell: platform === 'win32',
-                    env: childEnv,
-                });
-                child.on('error', (err) => console.error('[!] Failed to launch antigravity:', err.message));
-                child.unref();
+            if (await restartManagedIde()) {
+                return res.json({ launched: true, managedBy: 'pm2', platform });
             }
-
-            res.json({ launched: true, platform });
+            const launched = launchDesktopIde();
+            res.json({ launched, managedBy: 'spawn', platform });
         } catch (e) {
             console.error('[!] Launch IDE error:', e.message);
             res.status(500).json({ error: 'Failed to launch IDE' });

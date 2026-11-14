@@ -239,7 +239,9 @@ if (AUTH_KEY) {
   
   // Apply strict rate limiter to sensitive operations
   app.use('/api/settings', strictLimiter);
+  app.use('/api/permissions', strictLimiter);
   app.use('/api/launch-ide', strictLimiter);
+  app.use('/api/ide/restart', strictLimiter);
   app.use('/api/kill-ide', strictLimiter);
   app.use('/api/agy/update', strictLimiter);
 } else {

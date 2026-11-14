@@ -7,9 +7,9 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
+const { execFile } = require('child_process');
 const { getSettings: defaultGetSettings, saveSettings: defaultSaveSettings } = require('./config');
-const { getChildProcessEnv, getChromiumProxyArgs } = require('./proxy-manager');
+const { findLinuxIdeBinary, stopManagedIde, restartManagedIde, launchDesktopIde } = require('./ide-launcher');
 
 const PS_PATH = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const SUPPORTED_PLATFORMS = new Set(['win32', 'linux', 'darwin']);
@@ -173,15 +173,7 @@ async function detectIdeInstalled(opts = {}) {
     if (rt.platform === 'darwin') {
         return fs.existsSync('/Applications/Antigravity.app') || fs.existsSync(path.join(rt.homeDir, 'Applications', 'Antigravity.app'));
     }
-    for (const candidate of ['/usr/bin/antigravity', '/usr/local/bin/antigravity', '/opt/Antigravity/antigravity']) {
-        if (fs.existsSync(candidate)) return true;
-    }
-    try {
-        const whichOut = await execFileAsync('which', ['antigravity'], 2000);
-        return Boolean(whichOut);
-    } catch {
-        return false;
-    }
+    return Boolean(findLinuxIdeBinary());
 }
 
 async function detectIdeRunning(opts = {}) {
@@ -249,6 +241,10 @@ async function gracefulCloseIde(opts = {}) {
         }
         await new Promise(r => setTimeout(r, 1000));
         return exePath;
+    }
+
+    if (rt.platform === 'linux') {
+        await stopManagedIde();
     }
 
     const procs = await findUnixIdeProcesses();
@@ -370,46 +366,26 @@ async function swapFolders(currentProfile, targetProfile, opts = {}) {
     }
 }
 
-function relaunchIde(exePath, opts = {}) {
+async function relaunchIde(exePath, opts = {}) {
     const rt = getRuntime(opts);
     if (rt.skipIdeControl) return false;
-    const childEnv = getChildProcessEnv(process.env);
-    const proxyArgs = getChromiumProxyArgs();
 
-    if (rt.platform === 'win32') {
-        const fallback = path.join(rt.localAppDataDir || path.join(rt.homeDir, 'AppData', 'Local'), 'Programs', 'Antigravity', 'Antigravity.exe');
-        const exe = (exePath && fs.existsSync(exePath)) ? exePath : fallback;
-        if (!fs.existsSync(exe)) {
-            console.log(`[!] Profile swap: IDE executable not found at ${exe} — skipping relaunch`);
-            return false;
+    if (rt.platform === 'linux') {
+        try {
+            if (await restartManagedIde()) {
+                console.log('[*] Profile swap: restarted managed antigravity-hub via PM2');
+                return true;
+            }
+        } catch (err) {
+            console.warn(`[!] Profile swap: PM2 restart failed (${err.message}), falling back to direct spawn`);
         }
-        console.log(`[*] Profile swap: relaunching IDE (${exe})...`);
-        const child = spawn(exe, proxyArgs, { detached: true, stdio: 'ignore', env: childEnv });
-        child.unref();
-        return true;
     }
 
-    if (rt.platform === 'darwin') {
-        if (!fs.existsSync('/Applications/Antigravity.app') && !fs.existsSync(path.join(rt.homeDir, 'Applications', 'Antigravity.app'))) {
-            return false;
-        }
-        const openArgs = proxyArgs.length ? ['-a', 'Antigravity', '--args', ...proxyArgs] : ['-a', 'Antigravity'];
-        const child = spawn('open', openArgs, { detached: true, stdio: 'ignore', env: childEnv });
-        child.unref();
-        return true;
-    }
-
-    // Linux desktop vs headless VPS
-    if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
-        console.log('[*] Profile swap: headless Linux/VPS environment (no DISPLAY), skipping desktop IDE relaunch');
-        return false;
-    }
-    const candidates = [exePath, '/usr/bin/antigravity', '/usr/local/bin/antigravity', '/opt/Antigravity/antigravity'].filter(Boolean);
-    const exe = candidates.find(p => fs.existsSync(p));
-    if (!exe) return false;
-    const child = spawn(exe, proxyArgs, { detached: true, stdio: 'ignore', env: childEnv });
-    child.unref();
-    return true;
+    return launchDesktopIde({
+        exePath,
+        homeDir: rt.homeDir,
+        localAppDataDir: rt.localAppDataDir,
+    });
 }
 
 function validateProfileName(name) {
@@ -450,7 +426,7 @@ async function swapProfile(targetProfile, opts = {}) {
         await killJavaZombies(rt);
         await swapFolders(currentProfile, targetProfile, rt);
         rt.saveSettings({ activeProfile: targetProfile });
-        const relaunched = relaunchIde(exePath, rt);
+        const relaunched = await relaunchIde(exePath, rt);
 
         try {
             const { broadcastAll } = require('./ws');
@@ -588,7 +564,7 @@ async function startAddAccount(opts = {}) {
             }
         }
 
-        const relaunched = relaunchIde(exePath, rt);
+        const relaunched = await relaunchIde(exePath, rt);
         rt.saveSettings({ activeProfile: null });
         return {
             success: true,
@@ -630,7 +606,7 @@ async function cancelAddAccount(previousProfile, opts = {}) {
         }
 
         rt.saveSettings({ activeProfile: previousProfile });
-        const relaunched = relaunchIde(exePath, rt);
+        const relaunched = await relaunchIde(exePath, rt);
         return { success: true, activeProfile: previousProfile, relaunched };
     } finally {
         _swapping = false;
@@ -668,6 +644,8 @@ module.exports = {
     isSwapping,
     assertProfileSwapSupported,
     getProfileEnvironment,
+    detectIdeInstalled,
+    detectIdeRunning,
     getAntigravityDataDir,
     getProfilesDir,
     getSwapFolders,

@@ -8,6 +8,7 @@ function setupRoutes(app) {
     require('./routes/agy')(app);
     require('./routes/profiles')(app);
     require('./routes/settings')(app);
+    require('./routes/permissions')(app);
     require('./routes/push')(app);
     require('./routes/workspaces')(app);
     require('./routes/git')(app);
