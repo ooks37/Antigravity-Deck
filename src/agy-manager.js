@@ -44,17 +44,18 @@ function getDefaultAgyCandidates(env = process.env, platformName = process.platf
         candidates.push({ path: env.AGY_BIN.trim(), source: 'env' });
     }
 
+    const pathImpl = platformName === 'win32' ? path.win32 : path.posix;
     if (platformName === 'win32') {
-        const localAppData = env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
+        const localAppData = env.LOCALAPPDATA || pathImpl.join(homeDir, 'AppData', 'Local');
         candidates.push(
-            { path: path.join(localAppData, 'agy', 'bin', 'agy.exe'), source: 'default-win32' },
-            { path: path.join(homeDir, '.local', 'bin', 'agy.exe'), source: 'default-local' },
-            { path: path.join(homeDir, '.agy', 'bin', 'agy.exe'), source: 'default-agy' },
+            { path: pathImpl.join(localAppData, 'agy', 'bin', 'agy.exe'), source: 'default-win32' },
+            { path: pathImpl.join(homeDir, '.local', 'bin', 'agy.exe'), source: 'default-local' },
+            { path: pathImpl.join(homeDir, '.agy', 'bin', 'agy.exe'), source: 'default-agy' },
         );
     } else {
         candidates.push(
-            { path: path.join(homeDir, '.local', 'bin', 'agy'), source: 'default-local' },
-            { path: path.join(homeDir, '.agy', 'bin', 'agy'), source: 'default-agy' },
+            { path: pathImpl.join(homeDir, '.local', 'bin', 'agy'), source: 'default-local' },
+            { path: pathImpl.join(homeDir, '.agy', 'bin', 'agy'), source: 'default-agy' },
             { path: '/usr/local/bin/agy', source: 'default-usr-local' },
             { path: '/opt/homebrew/bin/agy', source: 'default-homebrew' },
             { path: '/usr/bin/agy', source: 'default-usr' },
