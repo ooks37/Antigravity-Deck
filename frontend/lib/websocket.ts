@@ -183,6 +183,12 @@ export function useWebSocket() {
             }
         });
 
+        const offProxyUpdated = wsService.on('proxy_updated', (data) => {
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('proxy-updated', { detail: data.proxy }));
+            }
+        });
+
         const offStepsInit = wsService.on('steps_init', (data) => {
             setState(prev => {
                 if (data.conversationId && data.conversationId !== prev.currentConvId) return prev;
@@ -313,6 +319,7 @@ export function useWebSocket() {
             offStatus();
             offSwapComplete();
             offOAuthSwapped();
+            offProxyUpdated();
             offStepsInit();
             offStepsNew();
             offStepUpdated();

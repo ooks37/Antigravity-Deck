@@ -8,6 +8,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { getSettings } = require('./config');
+const { getChildProcessEnv } = require('./proxy-manager');
 
 const defaultExecFileAsync = promisify(execFile);
 
@@ -148,6 +149,7 @@ function createAgyManager(deps = {}) {
             timeout: timeoutMs,
             windowsHide: true,
             maxBuffer: 2 * 1024 * 1024,
+            env: getChildProcessEnv(env),
         });
     }
 

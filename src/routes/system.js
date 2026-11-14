@@ -37,25 +37,31 @@ module.exports = function setupSystemRoutes(app) {
     // Security: no user input, rate-limited via strictLimiter in server.js, auth-protected
     app.post('/api/launch-ide', (req, res) => {
         const { platform } = require('../config');
+        const { getChildProcessEnv, getChromiumProxyArgs } = require('../proxy-manager');
         console.log(`[*] Launch IDE requested (platform: ${platform})`);
 
         try {
+            const childEnv = getChildProcessEnv(process.env);
+            const proxyArgs = getChromiumProxyArgs();
             if (platform === 'darwin') {
                 // macOS: open Antigravity app
-                const child = spawn('open', ['-a', 'Antigravity'], {
+                const openArgs = proxyArgs.length ? ['-a', 'Antigravity', '--args', ...proxyArgs] : ['-a', 'Antigravity'];
+                const child = spawn('open', openArgs, {
                     timeout: 10000,
                     detached: true,
-                    stdio: 'ignore'
+                    stdio: 'ignore',
+                    env: childEnv,
                 });
                 child.on('error', (e) => console.error('[!] Failed to open Antigravity:', e.message));
                 child.unref();
             } else {
                 // Windows/Linux
-                const child = spawn('antigravity', [], {
+                const child = spawn('antigravity', proxyArgs, {
                     timeout: 10000,
                     detached: true,
                     stdio: 'ignore',
                     shell: platform === 'win32',
+                    env: childEnv,
                 });
                 child.on('error', (err) => console.error('[!] Failed to launch antigravity:', err.message));
                 child.unref();

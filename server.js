@@ -1,5 +1,7 @@
 // === AntigravityAuto Server — Entry Point ===
 const logger = require('./src/logger'); // MUST be first — intercepts console.* globally
+const { initProxyEnv } = require('./src/proxy-manager');
+initProxyEnv(); // Apply configured SOCKS5h/HTTP proxy env vars before spawning children or polling
 const express = require('express');
 const http = require('http');
 const crypto = require('crypto');

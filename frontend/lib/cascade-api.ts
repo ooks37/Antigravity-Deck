@@ -621,3 +621,86 @@ export async function triggerAgyUpdate(): Promise<AgyUpdateResult> {
     return data;
 }
 
+// === SOCKS5h / HTTP Proxy Pool ===
+export interface ProxyTestResult {
+    ok: boolean;
+    exitIp: string | null;
+    country: string | null;
+    city: string | null;
+    org: string | null;
+    latencyMs: number | null;
+    testedAt?: string;
+    error?: string;
+}
+
+export interface ProxyNode {
+    id: string;
+    name: string;
+    protocol: 'socks5h' | 'socks5' | 'socks4' | 'http' | 'https';
+    host: string;
+    port: number;
+    username: string;
+    hasPassword: boolean;
+    maskedUrl: string;
+    createdAt: string | null;
+    lastTest: ProxyTestResult | null;
+}
+
+export interface ProxyState {
+    enabled: boolean;
+    activeNodeId: string | null;
+    activeNode: ProxyNode | null;
+    applyToIde: boolean;
+    bypassHosts: string;
+    nodes: ProxyNode[];
+}
+
+export interface ProxyNodeInput {
+    name?: string;
+    protocol?: string;
+    host?: string;
+    port?: number | string;
+    username?: string;
+    password?: string;
+    clearPassword?: boolean;
+    url?: string;
+    activate?: boolean;
+}
+
+export async function getProxyState(): Promise<ProxyState> {
+    return apiJson<ProxyState>(`${API_BASE}/api/proxy`, undefined, '获取代理配置失败');
+}
+
+export async function getProxyIpStatus(): Promise<{ direct: ProxyTestResult; proxied: ProxyTestResult | null; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/ip`, undefined, '检测出口 IP 失败');
+}
+
+export async function addProxyNode(input: ProxyNodeInput): Promise<{ node: ProxyNode; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/nodes`, { method: 'POST', body: JSON.stringify(input) }, '添加代理节点失败');
+}
+
+export async function updateProxyNode(id: string, input: ProxyNodeInput): Promise<{ node: ProxyNode; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/nodes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }, '更新代理节点失败');
+}
+
+export async function deleteProxyNode(id: string): Promise<{ deleted: boolean; id: string; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' }, '删除代理节点失败');
+}
+
+export async function useProxyNode(id: string | null, enabled?: boolean): Promise<{ success: boolean; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/use`, { method: 'POST', body: JSON.stringify({ id, enabled }) }, '切换代理节点失败');
+}
+
+export async function rotateProxyNode(): Promise<{ success: boolean; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/rotate`, { method: 'POST' }, '轮换下一代理节点失败');
+}
+
+export async function updateProxyPreferences(prefs: { enabled?: boolean; applyToIde?: boolean; bypassHosts?: string }): Promise<{ success: boolean; state: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/preferences`, { method: 'PATCH', body: JSON.stringify(prefs) }, '更新代理偏好失败');
+}
+
+export async function testProxyNode(payload: { id?: string } | ProxyNodeInput): Promise<{ result: ProxyTestResult; state?: ProxyState }> {
+    return apiJson(`${API_BASE}/api/proxy/test`, { method: 'POST', body: JSON.stringify(payload) }, '测试代理连通性失败');
+}
+
+

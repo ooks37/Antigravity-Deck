@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile, spawn } = require('child_process');
 const { getSettings: defaultGetSettings, saveSettings: defaultSaveSettings } = require('./config');
+const { getChildProcessEnv, getChromiumProxyArgs } = require('./proxy-manager');
 
 const PS_PATH = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const SUPPORTED_PLATFORMS = new Set(['win32', 'linux', 'darwin']);
@@ -372,6 +373,8 @@ async function swapFolders(currentProfile, targetProfile, opts = {}) {
 function relaunchIde(exePath, opts = {}) {
     const rt = getRuntime(opts);
     if (rt.skipIdeControl) return false;
+    const childEnv = getChildProcessEnv(process.env);
+    const proxyArgs = getChromiumProxyArgs();
 
     if (rt.platform === 'win32') {
         const fallback = path.join(rt.localAppDataDir || path.join(rt.homeDir, 'AppData', 'Local'), 'Programs', 'Antigravity', 'Antigravity.exe');
@@ -381,7 +384,7 @@ function relaunchIde(exePath, opts = {}) {
             return false;
         }
         console.log(`[*] Profile swap: relaunching IDE (${exe})...`);
-        const child = spawn(exe, [], { detached: true, stdio: 'ignore' });
+        const child = spawn(exe, proxyArgs, { detached: true, stdio: 'ignore', env: childEnv });
         child.unref();
         return true;
     }
@@ -390,7 +393,8 @@ function relaunchIde(exePath, opts = {}) {
         if (!fs.existsSync('/Applications/Antigravity.app') && !fs.existsSync(path.join(rt.homeDir, 'Applications', 'Antigravity.app'))) {
             return false;
         }
-        const child = spawn('open', ['-a', 'Antigravity'], { detached: true, stdio: 'ignore' });
+        const openArgs = proxyArgs.length ? ['-a', 'Antigravity', '--args', ...proxyArgs] : ['-a', 'Antigravity'];
+        const child = spawn('open', openArgs, { detached: true, stdio: 'ignore', env: childEnv });
         child.unref();
         return true;
     }
@@ -403,7 +407,7 @@ function relaunchIde(exePath, opts = {}) {
     const candidates = [exePath, '/usr/bin/antigravity', '/usr/local/bin/antigravity', '/opt/Antigravity/antigravity'].filter(Boolean);
     const exe = candidates.find(p => fs.existsSync(p));
     if (!exe) return false;
-    const child = spawn(exe, [], { detached: true, stdio: 'ignore' });
+    const child = spawn(exe, proxyArgs, { detached: true, stdio: 'ignore', env: childEnv });
     child.unref();
     return true;
 }

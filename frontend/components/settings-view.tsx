@@ -7,6 +7,7 @@ import type { AppSettings, AgyStatus, AgyChangelog, AgyUpdateResult } from '@/li
 import { cn } from '@/lib/utils';
 import { Check, X, Sparkles, CircleDot, Bot, Settings, Globe, Camera, Star, Bell, Terminal, RefreshCw, Download, FileText, Loader2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { ProxyPanel } from './proxy-panel';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -567,6 +568,9 @@ export function SettingsView() {
                         </p>
                     </CardContent>
                 </Card>
+
+                {/* SOCKS5h / HTTP Proxy Pool */}
+                <ProxyPanel />
 
                 {/* Save */}
                 <div className="flex items-center gap-3">

@@ -7,7 +7,7 @@ import { extractStepContent, exportToMarkdown } from '@/lib/step-utils';
 import { Timeline } from '@/components/timeline';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, WifiOff, Rocket, Loader2, Check, Smartphone, Share2, X, Users, Settings, KeyRound } from 'lucide-react';
+import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, WifiOff, Rocket, Loader2, Check, Smartphone, Share2, X, Users, Settings, KeyRound, Network, RotateCw, Power } from 'lucide-react';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import type { Project } from '@/lib/conversations';
@@ -15,6 +15,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -32,7 +33,7 @@ import { WorkspaceOnboardModal } from '@/components/workspace-onboard-modal';
 import { notificationService } from '@/lib/notifications';
 import { initAppLogger } from '@/lib/app-logger';
 import { usePwaInstall } from '@/hooks/use-pwa-install';
-import { getSettings, getProfiles } from '@/lib/cascade-api';
+import { getSettings, getProfiles, getProxyState, useProxyNode, rotateProxyNode, type ProxyState } from '@/lib/cascade-api';
 
 
 // Lazy-load components that are hidden by default
@@ -109,6 +110,8 @@ export default function Home() {
   });
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [accountBadge, setAccountBadge] = useState<{ label: string; email: string | null; total: number } | null>(null);
+  const [proxyState, setProxyState] = useState<ProxyState | null>(null);
+  const [proxyBusy, setProxyBusy] = useState(false);
 
   const refreshAccountBadge = useCallback(() => {
     getProfiles()
@@ -125,15 +128,50 @@ export default function Home() {
       .catch(() => { /* keep previous */ });
   }, []);
 
+  const refreshProxyState = useCallback(() => {
+    getProxyState()
+      .then((d) => setProxyState(d))
+      .catch(() => { /* keep previous */ });
+  }, []);
+
   useEffect(() => {
     refreshAccountBadge();
+    refreshProxyState();
     window.addEventListener('oauth-account-swapped', refreshAccountBadge);
     window.addEventListener('profile-swapped', refreshAccountBadge);
+    window.addEventListener('proxy-updated', refreshProxyState);
     return () => {
       window.removeEventListener('oauth-account-swapped', refreshAccountBadge);
       window.removeEventListener('profile-swapped', refreshAccountBadge);
+      window.removeEventListener('proxy-updated', refreshProxyState);
     };
-  }, [refreshAccountBadge]);
+  }, [refreshAccountBadge, refreshProxyState]);
+
+  const handleSwitchProxy = useCallback(async (nodeId: string | null) => {
+    if (proxyBusy) return;
+    setProxyBusy(true);
+    try {
+      const res = await useProxyNode(nodeId, nodeId !== null);
+      setProxyState(res.state);
+    } catch (e) {
+      console.error('Switch proxy failed:', e);
+    } finally {
+      setProxyBusy(false);
+    }
+  }, [proxyBusy]);
+
+  const handleRotateProxy = useCallback(async () => {
+    if (proxyBusy) return;
+    setProxyBusy(true);
+    try {
+      const res = await rotateProxyNode();
+      setProxyState(res.state);
+    } catch (e) {
+      console.error('Rotate proxy failed:', e);
+    } finally {
+      setProxyBusy(false);
+    }
+  }, [proxyBusy]);
 
   // === PWA Notification service init + App Logger ===
   useEffect(() => {
@@ -567,6 +605,84 @@ export default function Home() {
               {lastUpdate && <span className="text-xs text-muted-foreground hidden md:inline">{lastUpdate}</span>}
               {/* Status & Quick Account Bar */}
               <div className="flex items-center gap-1.5">
+                {/* Quick Proxy Switcher */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      disabled={proxyBusy}
+                      title={
+                        proxyState?.enabled && proxyState?.activeNode
+                          ? `出口代理: ${proxyState.activeNode.name} (${proxyState.activeNode.lastTest?.exitIp || `${proxyState.activeNode.host}:${proxyState.activeNode.port}`}) — 点击切换 IP`
+                          : '当前直连（点击切换 SOCKS5h/HTTP 出口代理）'
+                      }
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
+                        proxyState?.enabled && proxyState?.activeNode
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+                          : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border/50'
+                      }`}
+                    >
+                      {proxyBusy ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                      ) : (
+                        <Network className={`w-3 h-3 ${proxyState?.enabled && proxyState?.activeNode ? 'text-emerald-400' : 'text-muted-foreground'}`} />
+                      )}
+                      <span className="max-w-[90px] truncate hidden sm:inline">
+                        {proxyState?.enabled && proxyState?.activeNode ? proxyState.activeNode.name : '直连'}
+                      </span>
+                      {proxyState?.enabled && proxyState?.activeNode?.lastTest?.exitIp && (
+                        <span className="text-[9px] text-emerald-300/80 hidden lg:inline font-mono">
+                          {proxyState.activeNode.lastTest.exitIp}
+                        </span>
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-60 text-xs">
+                    <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                      {proxyState?.enabled && proxyState?.activeNode
+                        ? `当前出口: ${proxyState.activeNode.name} (${proxyState.activeNode.lastTest?.exitIp || `${proxyState.activeNode.host}:${proxyState.activeNode.port}`})`
+                        : '当前模式: 本机直连（无代理）'}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => handleSwitchProxy(null)}
+                      className="text-xs justify-between cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Power className="w-3.5 h-3.5 text-muted-foreground" />
+                        直连（不使用代理）
+                      </span>
+                      {!proxyState?.enabled && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                    </DropdownMenuItem>
+                    {proxyState && proxyState.nodes.length > 0 && <DropdownMenuSeparator />}
+                    {proxyState?.nodes.map((node) => (
+                      <DropdownMenuItem
+                        key={node.id}
+                        onClick={() => handleSwitchProxy(node.id)}
+                        className="text-xs justify-between cursor-pointer gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">{node.name}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono truncate">
+                            {node.protocol.toUpperCase()} · {node.lastTest?.exitIp || `${node.host}:${node.port}`}
+                          </div>
+                        </div>
+                        {proxyState.enabled && proxyState.activeNodeId === node.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    {proxyState && proxyState.nodes.length > 0 && (
+                      <DropdownMenuItem onClick={handleRotateProxy} className="text-xs gap-1.5 cursor-pointer">
+                        <RotateCw className="w-3.5 h-3.5 text-sky-400" />
+                        一键换下一个 IP
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={handleShowSettings} className="text-xs gap-1.5 cursor-pointer">
+                      <Settings className="w-3.5 h-3.5 text-muted-foreground" />
+                      管理代理与测速...
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
                 <button
                   onClick={handleShowAccountInfo}
                   title={accountBadge?.email ? `当前账号: ${accountBadge.email}（点击切换/管理）` : '点击打开多账号管理与配额'}
