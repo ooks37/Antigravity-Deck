@@ -2,28 +2,28 @@ import { Step, StepDisplayConfig, StepStats } from './types';
 
 // === Step type display config ===
 export const STEP_DISPLAY: Record<string, StepDisplayConfig> = {
-    'CORTEX_STEP_TYPE_USER_INPUT': { role: 'user', icon: 'User', label: 'User', show: true },
-    'CORTEX_STEP_TYPE_PLANNER_RESPONSE': { role: 'thinking', icon: 'MessageCircle', label: 'Agent Thinking', show: true, collapsible: true },
-    'CORTEX_STEP_TYPE_NOTIFY_USER': { role: 'response', icon: 'Megaphone', label: 'Agent Response', show: true },
-    'CORTEX_STEP_TYPE_CODE_ACTION': { role: 'tool', icon: 'FileEdit', label: 'Code Edit', show: true },
-    'CORTEX_STEP_TYPE_CODE_ACKNOWLEDGEMENT': { role: 'tool', icon: 'CheckCircle', label: 'Code Applied', show: true },
-    'CORTEX_STEP_TYPE_RUN_COMMAND': { role: 'tool', icon: 'Zap', label: 'Terminal', show: true },
-    'CORTEX_STEP_TYPE_COMMAND_STATUS': { role: 'tool', icon: 'BarChart2', label: 'Command Status', show: true },
-    'CORTEX_STEP_TYPE_SEND_COMMAND_INPUT': { role: 'tool', icon: 'Keyboard', label: 'Command Input', show: true },
-    'CORTEX_STEP_TYPE_VIEW_FILE': { role: 'tool', icon: 'FileText', label: 'View File', show: true },
-    'CORTEX_STEP_TYPE_LIST_DIRECTORY': { role: 'tool', icon: 'FolderOpen', label: 'List Dir', show: true },
-    'CORTEX_STEP_TYPE_BROWSER_SUBAGENT': { role: 'tool', icon: 'Globe', label: 'Browser', show: true },
-    'CORTEX_STEP_TYPE_TASK_BOUNDARY': { role: 'system', icon: 'ClipboardList', label: 'Task', show: true },
-    'CORTEX_STEP_TYPE_FIND': { role: 'tool', icon: 'Search', label: 'Search', show: true },
-    'CORTEX_STEP_TYPE_GREP_SEARCH': { role: 'tool', icon: 'Search', label: 'Grep', show: true },
-    'CORTEX_STEP_TYPE_ERROR_MESSAGE': { role: 'error', icon: 'XCircle', label: 'Error', show: true },
-    'CORTEX_STEP_TYPE_CHECKPOINT': { role: 'system', icon: 'Save', label: 'Checkpoint', show: true },
-    'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE': { role: 'system', icon: 'MessageSquare', label: 'System', show: true },
-    'CORTEX_STEP_TYPE_CONVERSATION_HISTORY': { role: 'system', icon: 'ScrollText', label: 'History', show: true },
-    'CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS': { role: 'system', icon: 'BookOpen', label: 'Knowledge', show: true },
-    'CORTEX_STEP_TYPE_READ_URL_CONTENT': { role: 'tool', icon: 'Globe', label: 'Read URL', show: true },
-    'CORTEX_STEP_TYPE_VIEW_CONTENT_CHUNK': { role: 'tool', icon: 'FileSearch', label: 'View Chunk', show: true },
-    'CORTEX_STEP_TYPE_GENERATE_IMAGE': { role: 'tool', icon: 'ImagePlus', label: 'Generate Image', show: true },
+    'CORTEX_STEP_TYPE_USER_INPUT': { role: 'user', icon: 'User', label: '用户', show: true },
+    'CORTEX_STEP_TYPE_PLANNER_RESPONSE': { role: 'thinking', icon: 'MessageCircle', label: '智能体思考', show: true, collapsible: true },
+    'CORTEX_STEP_TYPE_NOTIFY_USER': { role: 'response', icon: 'Megaphone', label: '智能体回复', show: true },
+    'CORTEX_STEP_TYPE_CODE_ACTION': { role: 'tool', icon: 'FileEdit', label: '代码编辑', show: true },
+    'CORTEX_STEP_TYPE_CODE_ACKNOWLEDGEMENT': { role: 'tool', icon: 'CheckCircle', label: '代码已应用', show: true },
+    'CORTEX_STEP_TYPE_RUN_COMMAND': { role: 'tool', icon: 'Zap', label: '终端命令', show: true },
+    'CORTEX_STEP_TYPE_COMMAND_STATUS': { role: 'tool', icon: 'BarChart2', label: '命令状态', show: true },
+    'CORTEX_STEP_TYPE_SEND_COMMAND_INPUT': { role: 'tool', icon: 'Keyboard', label: '命令输入', show: true },
+    'CORTEX_STEP_TYPE_VIEW_FILE': { role: 'tool', icon: 'FileText', label: '查看文件', show: true },
+    'CORTEX_STEP_TYPE_LIST_DIRECTORY': { role: 'tool', icon: 'FolderOpen', label: '列出目录', show: true },
+    'CORTEX_STEP_TYPE_BROWSER_SUBAGENT': { role: 'tool', icon: 'Globe', label: '浏览器', show: true },
+    'CORTEX_STEP_TYPE_TASK_BOUNDARY': { role: 'system', icon: 'ClipboardList', label: '任务阶段', show: true },
+    'CORTEX_STEP_TYPE_FIND': { role: 'tool', icon: 'Search', label: '文件查找', show: true },
+    'CORTEX_STEP_TYPE_GREP_SEARCH': { role: 'tool', icon: 'Search', label: '内容搜索', show: true },
+    'CORTEX_STEP_TYPE_ERROR_MESSAGE': { role: 'error', icon: 'XCircle', label: '错误', show: true },
+    'CORTEX_STEP_TYPE_CHECKPOINT': { role: 'system', icon: 'Save', label: '检查点', show: true },
+    'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE': { role: 'system', icon: 'MessageSquare', label: '系统消息', show: true },
+    'CORTEX_STEP_TYPE_CONVERSATION_HISTORY': { role: 'system', icon: 'ScrollText', label: '历史记录', show: true },
+    'CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS': { role: 'system', icon: 'BookOpen', label: '知识文档', show: true },
+    'CORTEX_STEP_TYPE_READ_URL_CONTENT': { role: 'tool', icon: 'Globe', label: '读取网页', show: true },
+    'CORTEX_STEP_TYPE_VIEW_CONTENT_CHUNK': { role: 'tool', icon: 'FileSearch', label: '查看片段', show: true },
+    'CORTEX_STEP_TYPE_GENERATE_IMAGE': { role: 'tool', icon: 'ImagePlus', label: '生成图片', show: true },
 };
 
 export function getStepConfig(type: string): StepDisplayConfig {
@@ -113,7 +113,7 @@ export function extractStepContent(step: Step): string | null {
                 return `${accepted ? '✅' : '❌'} **${basename}** (+${added} -${removed})`;
             }).join('\n');
         }
-        return `${accepted ? '✅ Accepted' : '❌ Rejected'} code changes`;
+        return `${accepted ? '✅ 已接受' : '❌ 已拒绝'}代码变更`;
     }
 
     if (step.runCommand || type === 'CORTEX_STEP_TYPE_RUN_COMMAND') {
@@ -127,8 +127,8 @@ export function extractStepContent(step: Step): string | null {
     if (step.sendCommandInput || type === 'CORTEX_STEP_TYPE_SEND_COMMAND_INPUT') {
         const sci = step.sendCommandInput || {};
         const parts: string[] = [];
-        if (sci.terminate) parts.push('🛑 **Terminated** command');
-        else if (sci.input) parts.push(`⌨️ Input: \`${sci.input.substring(0, 100)}\``);
+        if (sci.terminate) parts.push('🛑 **已终止**命令');
+        else if (sci.input) parts.push(`⌨️ 输入: \`${sci.input.substring(0, 100)}\``);
         if (sci.output?.full) { const out = sci.output.full.trim(); if (out.length > 0) parts.push(`\`\`\`\n${out.substring(0, 300)}${out.length > 300 ? '...' : ''}\n\`\`\``); }
         if (parts.length) return parts.join('\n');
         return null;
@@ -167,17 +167,17 @@ export function extractStepContent(step: Step): string | null {
         const parts: string[] = [];
         if (bs.task) parts.push(bs.task);
         else if (bs.description) parts.push(bs.description);
-        if (step.subtrajectory?.steps) { const subSteps = step.subtrajectory.steps; const lastSub = subSteps[subSteps.length - 1]; if (lastSub?.plannerResponse?.response) parts.push(`\n---\n**Result:** ${lastSub.plannerResponse.response.substring(0, 300)}`); }
-        return parts.join('\n') || 'Browser action';
+        if (step.subtrajectory?.steps) { const subSteps = step.subtrajectory.steps; const lastSub = subSteps[subSteps.length - 1]; if (lastSub?.plannerResponse?.response) parts.push(`\n---\n**结果:** ${lastSub.plannerResponse.response.substring(0, 300)}`); }
+        return parts.join('\n') || '浏览器操作';
     }
 
     if (step.readUrlContent || type === 'CORTEX_STEP_TYPE_READ_URL_CONTENT') { try { const args = JSON.parse(step.metadata?.argumentsJson || '{}'); if (args.Url) return `🌐 **${args.Url}**`; } catch { /* */ } return null; }
-    if (step.viewContentChunk || type === 'CORTEX_STEP_TYPE_VIEW_CONTENT_CHUNK') { try { const args = JSON.parse(step.metadata?.argumentsJson || '{}'); return `📑 Chunk #${args.position ?? '?'} from \`${args.document_id || ''}\``; } catch { /* */ } return null; }
+    if (step.viewContentChunk || type === 'CORTEX_STEP_TYPE_VIEW_CONTENT_CHUNK') { try { const args = JSON.parse(step.metadata?.argumentsJson || '{}'); return `📑 片段 #${args.position ?? '?'} 来自 \`${args.document_id || ''}\``; } catch { /* */ } return null; }
     if (step.errorMessage) { const em = step.errorMessage; if (typeof em === 'string') return em; if (em.error) { const e = em.error; if (typeof e === 'string') return e; return e.userErrorMessage || e.shortError || e.message || JSON.stringify(e); } return em.message || (typeof em.error === 'string' ? em.error : null) || JSON.stringify(em); }
     if (step.ephemeralMessage?.content) return step.ephemeralMessage.content.substring(0, 200) + '...';
-    if (step.checkpoint || type === 'CORTEX_STEP_TYPE_CHECKPOINT') { const cp = step.checkpoint || {}; const model = cp.modelName || cp.model || ''; const tokens = cp.inputTokens || cp.totalTokens || ''; if (model || tokens) return `💾 Model: **${model}**${tokens ? ` | Tokens: ${tokens}` : ''}`; return '💾 Checkpoint saved'; }
-    if (step.conversationHistory || type === 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY') return '📜 Conversation history loaded';
-    if (type === 'CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS') return '📚 Knowledge artifacts loaded';
+    if (step.checkpoint || type === 'CORTEX_STEP_TYPE_CHECKPOINT') { const cp = step.checkpoint || {}; const model = cp.modelName || cp.model || ''; const tokens = cp.inputTokens || cp.totalTokens || ''; if (model || tokens) return `💾 模型: **${model}**${tokens ? ` | Token: ${tokens}` : ''}`; return '💾 已保存检查点'; }
+    if (step.conversationHistory || type === 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY') return '📜 已加载对话历史';
+    if (type === 'CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS') return '📚 已加载知识文档';
     if (step.grepSearch || type === 'CORTEX_STEP_TYPE_GREP_SEARCH') { try { const args = JSON.parse(step.metadata?.argumentsJson || '{}'); return `🔍 \`${args.Query || ''}\` in \`${args.SearchPath || ''}\``; } catch { /* */ } return null; }
     if (step.find || type === 'CORTEX_STEP_TYPE_FIND') { try { const args = JSON.parse(step.metadata?.argumentsJson || '{}'); return `🔍 \`${args.Pattern || args.Query || ''}\` in \`${args.SearchDirectory || ''}\``; } catch { /* */ } return null; }
 
@@ -224,20 +224,20 @@ export function exportToMarkdown(steps: Step[], convId: string): void {
     steps.forEach(s => { const c = getStepConfig(s.type); typeCounts[c.label] = (typeCounts[c.label] || 0) + 1; });
     const countStr = Object.entries(typeCounts).map(([l, c]) => `${l}: ${c}`).join(' · ');
 
-    let md = `# Antigravity Deck Export\n\n**Conversation ID:** \`${convId}\`\n**Steps:** ${steps.length} (${countStr})\n**Exported:** ${new Date().toLocaleString()}\n\n---\n\n`;
+    let md = `# Antigravity Deck 对话导出\n\n**对话 ID:** \`${convId}\`\n**步骤数:** ${steps.length} (${countStr})\n**导出时间:** ${new Date().toLocaleString('zh-CN')}\n\n---\n\n`;
 
     steps.forEach((step, idx) => {
         const config = getStepConfig(step.type);
         const isUser = step.type === 'CORTEX_STEP_TYPE_USER_INPUT';
         const isAgent = step.plannerResponse?.modifiedResponse || step.plannerResponse?.response || step.type === 'CORTEX_STEP_TYPE_NOTIFY_USER';
-        const content = extractStepContent(step) || `_${config.label} step_`;
+        const content = extractStepContent(step) || `_${config.label}步骤_`;
 
         if (isUser) {
-            md += `## 💬 You (Step #${idx + 1})\n\n${content}\n\n---\n\n`;
+            md += `## 💬 你 (步骤 #${idx + 1})\n\n${content}\n\n---\n\n`;
         } else if (isAgent) {
-            md += `## 🤖 Agent (Step #${idx + 1})\n\n${content}\n\n---\n\n`;
+            md += `## 🤖 智能体 (步骤 #${idx + 1})\n\n${content}\n\n---\n\n`;
         } else {
-            md += `<details><summary>${config.icon} ${config.label} (Step #${idx + 1})</summary>\n\n\`\`\`\n${content.substring(0, 500)}\n\`\`\`\n\n</details>\n\n`;
+            md += `<details><summary>${config.icon} ${config.label} (步骤 #${idx + 1})</summary>\n\n\`\`\`\n${content.substring(0, 500)}\n\`\`\`\n\n</details>\n\n`;
         }
     });
 

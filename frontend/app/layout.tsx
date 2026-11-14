@@ -18,7 +18,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Antigravity Deck",
-  description: "Real-time Antigravity conversation mirror",
+  description: "Antigravity 实时对话镜像与工作区控制台",
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="zh-CN" className="dark">
       <body suppressHydrationWarning className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <SidebarProvider>
           <TooltipProvider delayDuration={200}>

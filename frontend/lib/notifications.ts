@@ -301,14 +301,14 @@ class NotificationService {
     if (this.getPermission() !== 'granted') {
       this.requestPermission().then((p) => {
         if (p === 'granted') {
-          this.showNotification('🔔 Test Notification', 'Notifications are working!', {
+          this.showNotification('🔔 测试通知', '通知推送功能运行正常！', {
             tag: 'test',
           });
         }
       });
       return;
     }
-    this.showNotification('🔔 Test Notification', 'Notifications are working!', {
+    this.showNotification('🔔 测试通知', '通知推送功能运行正常！', {
       tag: 'test',
     });
   }

@@ -25,7 +25,7 @@ export function WorkspaceOnboardModal({ open, suggestedRoot, onCompleted }: Work
 
     const handleSave = async () => {
         if (!path.trim()) {
-            setError('Workspace root path cannot be empty.');
+            setError('工作区根目录路径不能为空。');
             return;
         }
 
@@ -35,7 +35,7 @@ export function WorkspaceOnboardModal({ open, suggestedRoot, onCompleted }: Work
             const updated = await updateSettings({ defaultWorkspaceRoot: path.trim() });
             onCompleted(updated.defaultWorkspaceRoot);
         } catch (e: any) {
-            setError(e.message || 'Failed to save workspace root.');
+            setError(e.message || '保存工作区根目录失败。');
         } finally {
             setSaving(false);
         }
@@ -53,23 +53,22 @@ export function WorkspaceOnboardModal({ open, suggestedRoot, onCompleted }: Work
                     <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4 text-primary">
                         <FolderOpen className="w-6 h-6" />
                     </div>
-                    <DialogTitle className="text-center text-xl">Welcome to Antigravity Deck</DialogTitle>
+                    <DialogTitle className="text-center text-xl">欢迎使用 Antigravity Deck</DialogTitle>
                     <DialogDescription className="text-center">
-                        To get started, please configure a default workspace root. 
-                        New workspaces you create will be added here.
+                        开始使用前，请先配置默认工作区根目录。后续新建的工作区都会保存在此目录下。
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Workspace Root Path</label>
+                        <label className="text-sm font-medium">工作区根目录路径</label>
                         <Input 
                             value={path} 
                             onChange={e => {
                                 setPath(e.target.value);
                                 if (error) setError('');
                             }}
-                            placeholder="C:\Users\you\Workspace"
+                            placeholder="例如 /root/workspace 或 C:\Users\you\Workspace"
                             className="font-mono text-xs"
                             autoFocus
                         />
@@ -77,7 +76,7 @@ export function WorkspaceOnboardModal({ open, suggestedRoot, onCompleted }: Work
                             <p className="text-xs text-destructive">{error}</p>
                         ) : (
                             <p className="text-xs text-muted-foreground">
-                                All workspace folders detected in this directory will be available to open in the IDE.
+                                系统会自动扫描此目录下的工作区文件夹，方便你随时在 IDE 中打开。
                             </p>
                         )}
                     </div>
@@ -88,11 +87,11 @@ export function WorkspaceOnboardModal({ open, suggestedRoot, onCompleted }: Work
                         {saving ? (
                             <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
-                                Saving setup...
+                                正在保存设置...
                             </>
                         ) : (
                             <>
-                                Save & Continue
+                                保存并继续
                                 <ArrowRight className="w-4 h-4" />
                             </>
                         )}

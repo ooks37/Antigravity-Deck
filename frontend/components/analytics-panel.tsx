@@ -28,12 +28,12 @@ export function AnalyticsPanel({ steps }: AnalyticsPanelProps) {
     const maxCount = Math.max(...Object.values(stats.typeCounts), 1);
 
     const cards = [
-        { label: 'Total Steps', value: stats.total, icon: <BarChart2 className="h-3 w-3" /> },
-        { label: 'User Inputs', value: stats.user, icon: <User className="h-3 w-3" /> },
-        { label: 'Agent', value: stats.agent, icon: <Bot className="h-3 w-3" /> },
-        { label: 'Tool Calls', value: stats.tool, icon: <Wrench className="h-3 w-3" /> },
-        { label: 'System', value: stats.system, icon: <Settings className="h-3 w-3" /> },
-        { label: 'Errors', value: stats.error, icon: <XCircle className="h-3 w-3" /> },
+        { label: '总步骤数', value: stats.total, icon: <BarChart2 className="h-3 w-3" /> },
+        { label: '用户输入', value: stats.user, icon: <User className="h-3 w-3" /> },
+        { label: '智能体回复', value: stats.agent, icon: <Bot className="h-3 w-3" /> },
+        { label: '工具调用', value: stats.tool, icon: <Wrench className="h-3 w-3" /> },
+        { label: '系统步骤', value: stats.system, icon: <Settings className="h-3 w-3" /> },
+        { label: '错误数', value: stats.error, icon: <XCircle className="h-3 w-3" /> },
     ];
 
     return (

@@ -114,10 +114,10 @@ function CopyButton({ text }: { text: string }) {
         <button
             onClick={copy}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/40 transition-all"
-            title="Copy"
+            title="复制"
         >
             {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-            <span>{copied ? 'Copied!' : 'Copy'}</span>
+            <span>{copied ? '已复制！' : '复制'}</span>
         </button>
     );
 }
@@ -133,7 +133,7 @@ function CodeViewer({ content, ext }: { content: string; ext?: string }) {
             {/* Toolbar */}
             <div className="flex items-center justify-between px-3 h-8 border-b border-border/20 bg-muted/5 shrink-0">
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground/40">
-                    <span>{lines} lines</span>
+                    <span>{lines} 行</span>
                     {lang && lang !== 'text' && (
                         <>
                             <span>·</span>
@@ -274,7 +274,7 @@ function TreeNode({
                             className="text-[10px] text-muted-foreground/25 italic py-0.5"
                             style={{ paddingLeft: paddingLeft + 22 }}
                         >
-                            empty folder
+                            空文件夹
                         </div>
                     ) : (
                         children.map((child, idx) => (
@@ -356,7 +356,7 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                         <button
                             onClick={loadRoot}
                             className="p-1 rounded hover:bg-muted/30 text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors"
-                            title="Refresh"
+                            title="刷新"
                         >
                             <RefreshCw className="w-3 h-3" />
                         </button>
@@ -364,7 +364,7 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                         <button
                             onClick={() => setMobileListOpen(false)}
                             className="md:hidden p-1 rounded hover:bg-muted/30 text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors"
-                            title="Close panel"
+                            title="关闭面板"
                         >
                             <X className="w-3 h-3" />
                         </button>
@@ -388,7 +388,7 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                     )}
                     {!loading && !error && rootEntries?.length === 0 && (
                         <div className="px-4 py-8 text-center text-xs text-muted-foreground/30">
-                            Folder is empty
+                            文件夹为空
                         </div>
                     )}
                     {!loading && !error && rootEntries?.map(entry => (
@@ -417,10 +417,10 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                             <button
                                 onClick={() => setMobileListOpen(v => !v)}
                                 className="md:hidden flex items-center gap-1 px-2.5 py-2.5 text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors border-r border-border/30 shrink-0"
-                                title="Toggle file tree"
+                                title="切换文件树"
                             >
                                 <ArrowLeft className="w-4 h-4" />
-                                <span className="text-[10px] font-medium">Files</span>
+                                <span className="text-[10px] font-medium">文件</span>
                             </button>
                             <div className="flex items-center gap-1.5 px-3 py-2 border-b-2 border-primary bg-background text-foreground min-w-0 max-w-[300px]">
                                 <FileIcon ext={selectedExt} size={13} />
@@ -453,7 +453,7 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                             ) : fileContent !== null ? (
                                 fileContent === '' ? (
                                     <div className="flex items-center justify-center h-full text-muted-foreground/25 text-xs italic">
-                                        (empty file)
+                                        （空文件）
                                     </div>
                                 ) : (
                                     <CodeViewer content={fileContent} ext={selectedExt} />
@@ -467,7 +467,7 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                                     className="md:hidden fixed bottom-16 left-3 z-30 flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium shadow-lg shadow-black/30 hover:bg-primary transition-all active:scale-95"
                                 >
                                     <Menu className="w-3.5 h-3.5" />
-                                    <span>Files</span>
+                                    <span>文件</span>
                                 </button>
                             )}
                         </div>
@@ -480,11 +480,11 @@ function ExplorerTab({ workspace }: { workspace: string }) {
                                 onClick={() => setMobileListOpen(true)}
                                 className="md:hidden mb-2 px-3 py-1.5 rounded-md bg-muted/20 text-muted-foreground/50 text-xs hover:bg-muted/40 transition-colors"
                             >
-                                Open file tree
+                                打开文件树
                             </button>
                         )}
                         <FileText className="w-10 h-10" />
-                        <p className="text-xs">Click a file to view its contents</p>
+                        <p className="text-xs">点击文件以查看内容</p>
                     </div>
                 )}
             </div>
@@ -605,14 +605,14 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                             </span>
                         )}
                         <div className="flex items-center gap-1 -mr-2.5 md:mr-0">
-                            <button onClick={refresh} className="p-1 rounded hover:bg-muted/30 text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors" title="Refresh">
+                            <button onClick={refresh} className="p-1 rounded hover:bg-muted/30 text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors" title="刷新">
                                 <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
                             </button>
                             {/* Mobile: close panel button */}
                             <button
                                 onClick={() => setMobileListOpen(false)}
                                 className="md:hidden p-1 rounded hover:bg-muted/30 text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors"
-                                title="Close panel"
+                                title="关闭面板"
                             >
                                 <X className="w-3 h-3" />
                             </button>
@@ -637,7 +637,7 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                     {!loading && !error && files.length === 0 && (
                         <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground/20">
                             <GitBranch className="w-7 h-7" />
-                            <p className="text-xs">Working tree clean</p>
+                            <p className="text-xs">工作区干净，暂无变更</p>
                         </div>
                     )}
                     {files.map(f => (
@@ -697,10 +697,10 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                             <button
                                 onClick={() => setMobileListOpen(v => !v)}
                                 className="md:hidden flex items-center gap-1 px-2.5 py-2.5 text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors border-r border-border/30 shrink-0"
-                                title="Toggle file list"
+                                title="切换文件列表"
                             >
                                 <ArrowLeft className="w-4 h-4" />
-                                <span className="text-[10px] font-medium">Files</span>
+                                <span className="text-[10px] font-medium">文件</span>
                             </button>
                             {(['diff', 'original', 'current'] as const).map(mode => (
                                 <button
@@ -713,7 +713,7 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                                             : 'text-muted-foreground/50 border-transparent hover:text-muted-foreground hover:border-muted-foreground/20'
                                     )}
                                 >
-                                    {mode === 'diff' ? 'Changes' : mode === 'original' ? 'Before' : 'After'}
+                                    {mode === 'diff' ? '变更对比' : mode === 'original' ? '修改前' : '修改后'}
                                 </button>
                             ))}
                             <span className="flex-1" />
@@ -732,7 +732,7 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                                     diffData.hasDiff === false || !diffData.diffFile ? (
                                         <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground/30">
                                             <GitBranch className="w-8 h-8" />
-                                            <p className="text-xs">No changes (untracked file or empty diff)</p>
+                                            <p className="text-xs">暂无变更（未跟踪文件或空差异）</p>
                                         </div>
                                     ) : (
                                         <div className="flex flex-col h-full">
@@ -767,7 +767,7 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                                     className="md:hidden fixed bottom-16 left-3 z-30 flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium shadow-lg shadow-black/30 hover:bg-primary transition-all active:scale-95"
                                 >
                                     <Menu className="w-3.5 h-3.5" />
-                                    <span>Files</span>
+                                    <span>文件</span>
                                 </button>
                             )}
                         </div>
@@ -780,11 +780,11 @@ function SourceControlTab({ workspace }: { workspace: string }) {
                                 onClick={() => setMobileListOpen(true)}
                                 className="md:hidden mb-2 px-3 py-1.5 rounded-md bg-muted/20 text-muted-foreground/50 text-xs hover:bg-muted/40 transition-colors"
                             >
-                                Open file list
+                                打开文件列表
                             </button>
                         )}
                         <GitBranch className="w-10 h-10" />
-                        <p className="text-xs">Select a changed file to view diff</p>
+                        <p className="text-xs">选择一个变更文件以查看差异</p>
                     </div>
                 )}
             </div>
@@ -828,7 +828,7 @@ export const SourceControlView = memo(function SourceControlView({
                     )}
                 >
                     <FolderOpen className="w-3.5 h-3.5" />
-                    <span>Explorer</span>
+                    <span>文件浏览器</span>
                 </button>
 
                 <button
@@ -841,7 +841,7 @@ export const SourceControlView = memo(function SourceControlView({
                     )}
                 >
                     <GitBranch className="w-3.5 h-3.5" />
-                    <span>Source Control</span>
+                    <span>源代码管理</span>
                 </button>
 
                 <span className="flex-1" />
@@ -856,7 +856,7 @@ export const SourceControlView = memo(function SourceControlView({
                     <button
                         onClick={onClose}
                         className="p-1.5 rounded hover:bg-muted/50 text-muted-foreground/30 hover:text-muted-foreground transition-colors"
-                        title="Close"
+                        title="关闭"
                     >
                         <X className="w-3.5 h-3.5" />
                     </button>
@@ -898,7 +898,7 @@ function CurrentFileView({ workspace, filePath }: { workspace: string; filePath:
         </div>
     );
     if (content === null || content === '') return (
-        <div className="flex items-center justify-center h-full text-muted-foreground/25 text-xs italic">(empty file)</div>
+        <div className="flex items-center justify-center h-full text-muted-foreground/25 text-xs italic">（空文件）</div>
     );
 
     return <CodeViewer content={content} ext={filePath.split('.').pop()} />;

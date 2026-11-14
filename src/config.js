@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS = {
     activeProfile: null,   // string | null — currently active profile name for profile swap
     profilesDir: null,     // string | null — custom profiles directory (default: %APPDATA%/AntigravityDeck/profiles)
     lsBinaryPath: '',
+    agyBinaryPath: '',
 };
 
 let _settings = null;

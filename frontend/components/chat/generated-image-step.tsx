@@ -19,7 +19,7 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
     const [loading, setLoading] = useState(false);
 
     const gi = step.generateImage || {};
-    const imageName = gi.imageName || 'Generated Image';
+    const imageName = gi.imageName || '生成的图片';
     const prompt = gi.prompt || '';
     const modelName = gi.modelName || '';
     const uri = gi.generatedMedia?.uri || '';
@@ -75,7 +75,7 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
                     {loading ? (
                         <div className="flex items-center justify-center py-12 text-muted-foreground/60 text-sm gap-2">
                             <Loader2 className="h-5 w-5 animate-spin opacity-50" />
-                            <span>Loading image…</span>
+                            <span>正在加载图片…</span>
                         </div>
                     ) : imageSrc && !imageError ? (
                         <div className="relative group">
@@ -93,7 +93,7 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
                                     size="icon"
                                     className="h-8 w-8 bg-background/80 backdrop-blur-sm shadow-lg"
                                     onClick={() => setExpanded(true)}
-                                    title="Expand"
+                                    title="放大查看"
                                 >
                                     <Maximize2 className="h-3.5 w-3.5" />
                                 </Button>
@@ -102,7 +102,7 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
                                     size="icon"
                                     className="h-8 w-8 bg-background/80 backdrop-blur-sm shadow-lg"
                                     onClick={handleDownload}
-                                    title="Download"
+                                    title="下载图片"
                                 >
                                     <Download className="h-3.5 w-3.5" />
                                 </Button>
@@ -111,12 +111,12 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
                     ) : imageError ? (
                         <div className="flex items-center justify-center py-12 text-muted-foreground/60 text-sm">
                             <ImagePlus className="h-8 w-8 mr-3 opacity-30" />
-                            Failed to load image
+                            图片加载失败
                         </div>
                     ) : (
                         <div className="flex items-center justify-center py-12 text-muted-foreground/60 text-sm">
                             <ImagePlus className="h-8 w-8 mr-3 opacity-30" />
-                            No image data available
+                            暂无图片数据
                         </div>
                     )}
 

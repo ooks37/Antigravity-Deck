@@ -56,34 +56,34 @@ function statusBadge(status: McpServerStatus | undefined): React.ReactElement {
             return (
                 <Badge className="text-[10px] h-5 px-1.5 gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/10">
                     <CheckCircle2 className="w-3 h-3" />
-                    Connected
+                    已连接
                 </Badge>
             );
         case 'MCP_SERVER_STATUS_ERROR':
             return (
                 <Badge className="text-[10px] h-5 px-1.5 gap-1 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/10">
                     <XCircle className="w-3 h-3" />
-                    Error
+                    错误
                 </Badge>
             );
         case 'MCP_SERVER_STATUS_NOT_CONNECTED':
             return (
                 <Badge className="text-[10px] h-5 px-1.5 gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/10">
                     <AlertTriangle className="w-3 h-3" />
-                    Not Connected
+                    未连接
                 </Badge>
             );
         default:
             return (
                 <Badge className="text-[10px] h-5 px-1.5 bg-muted text-muted-foreground border border-border/30 hover:bg-muted">
-                    Unknown
+                    未知
                 </Badge>
             );
     }
 }
 
 function serverName(state: McpServerState): string {
-    return state.spec?.server_name || '(unnamed)';
+    return state.spec?.server_name || '（未命名）';
 }
 
 function toolCount(state: McpServerState): number {
@@ -111,7 +111,7 @@ export function McpView() {
             if (res.is_loading) pollTimerRef.current = setTimeout(fetchData, 2000);
         } catch (e: unknown) {
             if (!isMountedRef.current) return;
-            setError(e instanceof Error ? e.message : 'Failed to load MCP server states');
+            setError(e instanceof Error ? e.message : '加载 MCP 服务器状态失败');
         } finally {
             if (isMountedRef.current) setIsLoading(false);
         }
@@ -128,7 +128,7 @@ export function McpView() {
             await fetchData();
         } catch (e: unknown) {
             if (!isMountedRef.current) return;
-            setToggleErrors(prev => ({ ...prev, [name]: e instanceof Error ? e.message : 'Toggle failed' }));
+            setToggleErrors(prev => ({ ...prev, [name]: e instanceof Error ? e.message : '切换失败' }));
         } finally {
             if (isMountedRef.current) setTogglingServer(null);
         }
@@ -148,7 +148,7 @@ export function McpView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <Activity className="w-8 h-8 text-muted-foreground/50 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">Loading MCP servers...</span>
+                    <span className="text-sm text-muted-foreground">正在加载 MCP 服务器...</span>
                 </div>
             </div>
         );
@@ -159,13 +159,13 @@ export function McpView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                     <AlertTriangle className="w-8 h-8 text-red-400/60" />
-                    <span className="text-sm font-medium text-foreground/70">Failed to load MCP servers</span>
+                    <span className="text-sm font-medium text-foreground/70">加载 MCP 服务器失败</span>
                     <span className="text-xs text-muted-foreground font-mono break-all">{error}</span>
                     <button
                         onClick={() => { if (pollTimerRef.current !== null) clearTimeout(pollTimerRef.current); setIsLoading(true); setError(null); fetchData(); }}
                         className="text-xs px-3 py-1.5 rounded-lg bg-muted/40 hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors border border-border/30"
                     >
-                        Retry
+                        重试
                     </button>
                 </div>
             </div>
@@ -183,11 +183,11 @@ export function McpView() {
                         <Plug className="w-5 h-5 text-violet-400" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold">MCP Servers</h2>
+                        <h2 className="text-lg font-semibold">MCP 服务器</h2>
                         <p className="text-xs text-muted-foreground">
                             {serverList.length === 0
-                                ? 'No MCP servers configured'
-                                : `${serverList.length} server${serverList.length !== 1 ? 's' : ''} configured`}
+                                ? '尚未配置 MCP 服务器'
+                                : `已配置 ${serverList.length} 个服务器`}
                         </p>
                     </div>
                     {isLoading && (
@@ -199,19 +199,19 @@ export function McpView() {
                 {serverList.length === 0 ? (
                     <div className="rounded-xl border border-border/50 bg-card/50 p-10 text-center">
                         <Plug className="w-8 h-8 mx-auto text-muted-foreground/20 mb-3" />
-                        <p className="text-sm font-medium text-muted-foreground/60 mb-1">No MCP servers configured</p>
+                        <p className="text-sm font-medium text-muted-foreground/60 mb-1">尚未配置 MCP 服务器</p>
                         <p className="text-xs text-muted-foreground/40 max-w-xs mx-auto">
-                            Add MCP servers in Antigravity IDE to extend the agent with external tools.
+                            请在 Antigravity IDE 中添加 MCP 服务器，以扩展助手的外部工具能力。
                         </p>
                     </div>
                 ) : (
                     <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
                         {/* Column headers */}
                         <div className="grid grid-cols-[1fr_140px_64px_72px] gap-3 px-4 py-2 text-[10px] text-muted-foreground/50 uppercase tracking-wider font-medium border-b border-border/30 bg-muted/10">
-                            <span>Server</span>
-                            <span>Status</span>
-                            <span className="text-right">Tools</span>
-                            <span className="text-right">Enable</span>
+                            <span>服务器</span>
+                            <span>状态</span>
+                            <span className="text-right">工具数</span>
+                            <span className="text-right">启用</span>
                         </div>
                         {/* Rows */}
                         <div className="divide-y divide-border/20">
@@ -245,9 +245,9 @@ export function McpView() {
                                                 <button
                                                     onClick={() => handleToggle(state)}
                                                     disabled={isToggling || !svrName}
-                                                    title={isDisabled ? 'Enable server' : 'Disable server'}
+                                                    title={isDisabled ? '启用服务器' : '禁用服务器'}
                                                     className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                    aria-label={isDisabled ? 'Enable server' : 'Disable server'}
+                                                    aria-label={isDisabled ? '启用服务器' : '禁用服务器'}
                                                 >
                                                     {isToggling
                                                         ? <Loader2 className="w-4 h-4 text-muted-foreground/50 animate-spin" />
@@ -263,7 +263,7 @@ export function McpView() {
                                         {toggleErr && (
                                             <div className="px-4 pb-2 -mt-1">
                                                 <p className="text-[10px] text-amber-400/80 font-mono bg-amber-500/5 border border-amber-500/10 rounded px-2 py-1 break-all">
-                                                    Toggle failed: {toggleErr}
+                                                    切换失败: {toggleErr}
                                                 </p>
                                             </div>
                                         )}
@@ -300,7 +300,7 @@ export function McpView() {
 
                 {/* Footer hint */}
                 <p className="text-center text-[10px] text-muted-foreground/40 pb-4">
-                    Toggle enables/disables a server without removing its config. Add servers via Antigravity IDE settings.
+                    切换开关仅启用或禁用服务器，不会删除配置；如需新增请在 Antigravity IDE 设置中添加。
                 </p>
             </div>
         </div>

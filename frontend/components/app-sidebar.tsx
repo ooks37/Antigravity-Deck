@@ -125,11 +125,11 @@ export function AppSidebar({
     const nameValidationError = useMemo(() => {
         const trimmed = newName.trim()
         if (!trimmed) return ""
-        if (/[/\\:*?"<>|]/.test(trimmed)) return "Invalid characters in name"
-        if (trimmed.length > 100) return "Name too long (max 100)"
+        if (/[/\\:*?"<>|]/.test(trimmed)) return "项目名称包含非法字符"
+        if (trimmed.length > 100) return "名称过长（最多 100 个字符）"
         const lower = trimmed.toLowerCase()
         if (projects.some((p) => p.name.toLowerCase() === lower))
-            return "Project already exists"
+            return "同名项目已存在"
         return ""
     }, [newName, projects])
 
@@ -234,7 +234,7 @@ export function AppSidebar({
             await loadIndex()
             onProjectCreated(createdName)
         } catch (e) {
-            const msg = e instanceof Error ? e.message : "Failed to create project"
+            const msg = e instanceof Error ? e.message : "创建项目失败"
             setCreateError(msg)
         } finally {
             setCreating(false)
@@ -285,14 +285,14 @@ export function AppSidebar({
                                     className="w-full h-8 text-xs gap-1.5 justify-start"
                                 >
                                     <Plus className="h-3.5 w-3.5" />
-                                    New Conversation
+                                    新建对话
                                 </Button>
                             </div>
                             <SidebarMenu>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={() => onShowHistory(null)} tooltip="Conversation History" className="text-xs">
+                                    <SidebarMenuButton onClick={() => onShowHistory(null)} tooltip="历史对话" className="text-xs">
                                         <History className="shrink-0" />
-                                        <span>Conversation History</span>
+                                        <span>历史对话</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -303,17 +303,17 @@ export function AppSidebar({
 
                     {/* Projects */}
                     <SidebarGroup>
-                        <SidebarGroupLabel>Projects</SidebarGroupLabel>
-                        <SidebarGroupAction title="New Project" onClick={() => setShowCreateDialog(true)}>
-                            <Plus /> <span className="sr-only">New Project</span>
+                        <SidebarGroupLabel>项目列表</SidebarGroupLabel>
+                        <SidebarGroupAction title="新建项目" onClick={() => setShowCreateDialog(true)}>
+                            <Plus /> <span className="sr-only">新建项目</span>
                         </SidebarGroupAction>
                         <SidebarGroupContent>
                             {loading && projectRows.length === 0 && (
-                                <div className="px-3 py-4 text-xs text-muted-foreground text-center">Loading...</div>
+                                <div className="px-3 py-4 text-xs text-muted-foreground text-center">加载中...</div>
                             )}
                             {!loading && projectRows.length === 0 && (
                                 <div className="px-3 py-3 text-[11px] text-muted-foreground/50 text-center">
-                                    No projects yet. Open a folder in Antigravity, or create one with ＋.
+                                    暂无项目。请在 Antigravity 中打开文件夹，或点击右上角 ＋ 新建。
                                 </div>
                             )}
                             {projectRows.map(({ project, conversations, total }) => (
@@ -339,7 +339,7 @@ export function AppSidebar({
                         <>
                             <SidebarSeparator className="mx-0" />
                             <SidebarGroup>
-                                <SidebarGroupLabel>Conversations</SidebarGroupLabel>
+                                <SidebarGroupLabel>独立对话</SidebarGroupLabel>
                                 <SidebarGroupContent>
                                     <SidebarMenu>
                                         {loose.slice(0, LOOSE_LIMIT).map((conv) => (
@@ -361,7 +361,7 @@ export function AppSidebar({
                                                     onClick={() => onShowHistory(null)}
                                                     className="text-sidebar-foreground/50 text-[10px]"
                                                 >
-                                                    See all ({loose.length})
+                                                    查看全部 ({loose.length})
                                                 </SidebarMenuButton>
                                             </SidebarMenuItem>
                                         )}
@@ -377,27 +377,27 @@ export function AppSidebar({
                         <SidebarGroupContent>
                             <SidebarMenu>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowMcp} tooltip="MCP Servers" className="text-xs">
+                                    <SidebarMenuButton onClick={onShowMcp} tooltip="MCP 服务" className="text-xs">
                                         <Plug className="shrink-0" />
-                                        <span>MCP Servers</span>
+                                        <span>MCP 服务</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowWorkflows} tooltip="Workflows" className="text-xs">
+                                    <SidebarMenuButton onClick={onShowWorkflows} tooltip="工作流与技能" className="text-xs">
                                         <Workflow className="shrink-0" />
-                                        <span>Workflows</span>
+                                        <span>工作流</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowMemories} tooltip="Memories" className="text-xs">
+                                    <SidebarMenuButton onClick={onShowMemories} tooltip="长期记忆" className="text-xs">
                                         <Brain className="shrink-0" />
-                                        <span>Memories</span>
+                                        <span>记忆库</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowRepoInfo} tooltip="Repo Info" className="text-xs">
+                                    <SidebarMenuButton onClick={onShowRepoInfo} tooltip="仓库信息" className="text-xs">
                                         <GitBranch className="shrink-0" />
-                                        <span>Repo Info</span>
+                                        <span>仓库信息</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -427,10 +427,10 @@ export function AppSidebar({
                                         </Avatar>
                                         <div className="grid flex-1 text-left text-sm leading-tight">
                                             <span className="truncate font-medium text-xs">
-                                                {userProfile?.name ?? (detected ? 'Loading...' : 'Not Connected')}
+                                                {userProfile?.name ?? (detected ? '加载中...' : '未连接')}
                                             </span>
                                             <span className="truncate text-[10px] text-sidebar-foreground/60">
-                                                {userProfile?.tier ?? (detected ? '' : 'Open Antigravity IDE')}
+                                                {userProfile?.tier ?? (detected ? '' : '请先打开 Antigravity IDE')}
                                             </span>
                                         </div>
                                         <EllipsisVertical className="ml-auto size-4" />
@@ -444,37 +444,37 @@ export function AppSidebar({
                                 >
                                     <DropdownMenuItem onClick={onShowAccountInfo}>
                                         <User className="mr-2 h-4 w-4" />
-                                        <span>Account & Plan</span>
+                                        <span>账户与配额</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={onShowLogs}>
                                         <Activity className="mr-2 h-4 w-4" />
-                                        <span>Live Logs</span>
+                                        <span>实时日志</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={onShowSourceControl}>
                                         <GitBranch className="mr-2 h-4 w-4" />
-                                        <span>Source Control</span>
+                                        <span>源代码管理</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={onShowResources}>
                                         <Monitor className="mr-2 h-4 w-4" />
-                                        <span>Resources</span>
+                                        <span>系统资源监控</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={toggleTheme}>
                                         {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                                        <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+                                        <span>{isDark ? "浅色模式" : "深色模式"}</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem disabled>
                                         <Book className="mr-2 h-4 w-4 text-muted-foreground" />
-                                        <span className="text-muted-foreground">Knowledge (Coming Soon)</span>
+                                        <span className="text-muted-foreground">知识库 (敬请期待)</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem disabled>
                                         <Globe className="mr-2 h-4 w-4 text-muted-foreground" />
-                                        <span className="text-muted-foreground">Browser (Coming Soon)</span>
+                                        <span className="text-muted-foreground">内置浏览器 (敬请期待)</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem onClick={onShowSettings}>
                                         <Settings className="mr-2 h-4 w-4" />
-                                        <span>App Settings</span>
+                                        <span>应用设置</span>
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -491,16 +491,16 @@ export function AppSidebar({
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <FolderPlus className="h-5 w-5" />
-                            New Project
+                            新建项目
                         </DialogTitle>
                         <DialogDescription>
-                            Create a new project folder and jump straight into a conversation.
+                            在默认工作区下创建新的项目目录并立即开启对话。
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4 py-2">
                         <div className="space-y-2.5">
-                            <label className="text-xs font-medium text-muted-foreground">Project Name</label>
+                            <label className="text-xs font-medium text-muted-foreground">项目名称</label>
                             <Input
                                 value={newName}
                                 onChange={(e) => { setNewName(e.target.value); setCreateError("") }}
@@ -514,7 +514,7 @@ export function AppSidebar({
                                 <p className="text-xs text-destructive">{nameValidationError || createError}</p>
                             )}
                             <p className="text-xs text-muted-foreground">
-                                Creates a folder in your workspace root directory, opens it, and starts a new chat.
+                                将在你的工作区根目录下创建文件夹、自动打开并创建新会话。
                             </p>
                         </div>
                     </div>
@@ -526,7 +526,7 @@ export function AppSidebar({
                             onClick={() => { setShowCreateDialog(false); setNewName(""); setCreateError("") }}
                             disabled={creating}
                         >
-                            Cancel
+                            取消
                         </Button>
                         <Button
                             size="sm"
@@ -534,7 +534,7 @@ export function AppSidebar({
                             disabled={creating || !newName.trim() || !!nameValidationError}
                         >
                             {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
-                            Create Project
+                            创建项目
                         </Button>
                     </DialogFooter>
                 </DialogContent>

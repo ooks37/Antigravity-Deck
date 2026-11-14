@@ -1,177 +1,137 @@
-# 🔮 Antigravity Deck
+# 🔮 Antigravity Deck（中文增强版）
 
-**Remote control for [Antigravity](https://antigravity.google) — manage AI conversations, cascades, and workspaces from any device.**
+**专为 [Antigravity](https://antigravity.google) 打造的远程控制面板 —— 从任意设备管理 AI 对话、Cascade 任务与工作区。**
 
-Full-featured web dashboard for Antigravity. View, send, and manage AI conversations from any device — with a searchable all-time history across every project, live cascade control, resource monitoring, source control, IDE tools, and secure remote access.
+> 本仓库 Fork 自 [`tysonnbt/Antigravity-Deck`](https://github.com/tysonnbt/Antigravity-Deck)，在此基础上完成了**全界面简体中文本地化**，并新增了 **Antigravity CLI (`agy`) 版本检测与一键手动更新**能力，不锁定任何 `agy` 版本。
 
-> Built for **Antigravity 2.0.11+**, which runs a single shared **hub** Language Server. The Deck auto-detects the hub, tracks your workspaces on it, and streams full conversation history out of the IDE's Jetbox subsystem.
+这是一个功能完整的 Antigravity Web 控制台，支持在电脑或手机上查看、发送与管理所有项目的 AI 对话，提供全局历史搜索、实时 Cascade 控制、资源监控、源码查看、IDE 扩展工具与安全远程访问。
+
+> 基于 **Antigravity 2.0.11+** 单共享 **Hub** Language Server 架构构建。Deck 会自动发现运行中的 Hub、跟踪工作区，并通过 IDE 的 Jetbox 子系统流式获取完整对话历史。
 
 ---
 
-## 📸 Screenshots
+## 🆕 本分支新增与增强
 
-| Conversation History | Conversation View |
+- **全量简体中文本地化**：完整汉化聊天对话界面、欢迎引导页、审批卡片、设置面板、资源监控、源码管理/Git 差异、实时日志、MCP / 工作流 / 长期记忆 / 仓库信息面板，以及安装/卸载脚本。
+- **`agy` CLI 不锁版本 & 手动一键更新**：
+  - 设置页新增 **「Antigravity CLI (`agy`) 版本与更新」** 卡片，自动探测本机 `agy` 可执行文件路径（支持在设置中自定义路径）。
+  - 实时展示当前已安装的 `agy` 版本、直接拉取并浏览 `agy changelog` 官方更新日志。
+  - 点击 **「更新到最新版」** 即可通过后端安全调用 `agy update` 升级到最新正式版本，即使 Language Server 尚未启动，也可从欢迎页直接进入设置完成更新。
+  - 新增后端接口：`GET /api/agy/status`、`GET /api/agy/changelog`、`POST /api/agy/update`。
+
+---
+
+## 📸 界面截图
+
+| 对话历史 | 对话详情 |
 |:-:|:-:|
 | ![History](docs/images/history-desktop.png) | ![Conversation](docs/images/conversation-desktop.png) |
 
-| Resource Monitor | Mobile |
+| 资源监控 | 移动端适配 |
 |:-:|:-:|
 | ![Resources](docs/images/resource-monitor.png) | ![Mobile](docs/images/conversation-mobile.png) |
 
 ---
 
-## ✨ Feature Highlights
+## ✨ 功能特性
 
-### 🗂️ Conversation History & Projects
-The landing view — your complete Antigravity history in one place.
+### 🗂️ 对话历史与项目管理
+- **全量历史记录**：通过 IDE 的 **Jetbox** 子系统（`JetboxSubscribeToSummaries`）流式加载所有项目的完整历史对话，而非仅限当前打开的几个窗口。
+- **按项目分组**：历史记录页与侧边栏均支持按 Antigravity 项目分组展示与统计数量。
+- **搜索与筛选**：按项目筛选或按标题搜索历史对话，展示所属项目、步骤数与更新时间。
+- **新建与删除**：支持全局或按指定工作区发起新对话，随时删除旧对话。
 
-- **All-time history** — Streams the complete conversation list (every project, not just the active few) from the IDE's **Jetbox** subsystem (`JetboxSubscribeToSummaries`)
-- **Project grouping** — Conversations are organized by Antigravity Project, both in the history view (project filter tabs with counts) and in the sidebar (collapsible per-project groups)
-- **Search & filter** — Filter history by project and search by title; each entry shows its project, step count, and age
-- **Create & delete** — Start new conversations (globally or scoped to a project) and delete old ones, all from the UI
+### 💬 聊天与交互体验
+- **实时收发**：直接在 Web 端发送消息，支持乐观渲染与流畅打字态展示。
+- **完整步骤分页**：混合使用 JSON 与二进制 Protobuf 接口绕过约 600 步的 JSON 限制，向上滚动即可加载更早步骤。
+- **WebSocket 实时同步**：自适应轮询 + 流式订阅 Language Server 状态（`StreamAgentStateUpdates` + Cascade SSE），即时感知等待用户输入等状态变化。
+- **全步骤类型渲染**：支持用户输入、助手回复、工具调用、代码编辑、终端命令、浏览器子代理、生成图片等 20+ 种步骤。
+- **多图上传**：支持文件选择、剪贴板粘贴（`Ctrl+V`）与拖拽上传。
+- **模型选择器**：实时读取可用模型分组、配额进度条、图像支持标识与推荐标记。
+- **高级渲染与效率工具**：Markdown 语法高亮、可折叠思考过程、`/` 工作流自动补全、步骤书签（`B`）、时间线定位、统计分析面板、Token 用量视图与 Markdown 导出（`Ctrl+Shift+E`）。
 
-### 💬 Chat & Conversations
-- **Send & receive** — Compose and send messages to Antigravity cascades directly from the web UI, with optimistic rendering of pending messages
-- **Full step history** — Hybrid JSON + binary protobuf fetching bypasses the ~600-step JSON API limit, so the entire conversation loads (scroll up to page in older steps)
-- **Real-time updates** — WebSocket-powered, with adaptive polling (faster while a cascade is active, slower when idle) plus streaming subscriptions to the LS (`StreamAgentStateUpdates` + cascade SSE) for instant state changes and "waiting for input" detection
-- **All step types** — User input, agent responses, tool calls, code actions, commands, browser subagent, generated images, and 17+ more, each with its own rendering
-- **Multi-image upload** — Attach images via file picker, clipboard paste (`Ctrl+V`), or drag-and-drop, with a thumbnail preview strip
-- **Model selection** — Grouped model picker fetched live from the LS (quota bar, image-support icon, recommended badge)
-- **Smart rendering** — Markdown with syntax highlighting, collapsible thinking blocks, step-type tags
-- **Workflow autocomplete** — Suggests available slash-command workflows as you type `/`
-- **Power features** — Step-detail slide-over, step bookmarks (`B`), timeline scrubber, analytics bar (step/token breakdown), token-usage view, Markdown export (`Ctrl+Shift+E`), and full keyboard shortcuts
+### 🖥️ 工作区与 Hub 管理
+- **自动发现**：跨平台（Windows / macOS / Linux）自动探测正在运行的 Antigravity Hub Language Server 端口与 CSRF Token。
+- **目录跟踪**：配置默认工作区根目录，自动列出子目录并通过 `AddTrackedWorkspace` 一键绑定。
+- **启动 IDE**：未检测到运行中的 IDE 时，支持从 Web 端直接拉起 Antigravity，或先打开设置更新 `agy`。
 
-### 🖥️ Workspace Management
-Built for the 2.0.11 single-hub model — workspaces are tracked on the shared LS, not spun up as separate processes.
+### ⚡ Cascade 审批与控制
+- **审批门控卡片**：当助手请求执行命令、编辑文件或 MCP 输入时，动态渲染与 IDE 一致的授权选项，支持远程批准或拒绝。
+- **自动批准模式**：可选服务端自动放行待审批操作（含文件编辑的工作区边界校验，只读操作默认安全放行）。
+- **随时中断**：支持立即取消正在运行的 Cascade 任务。
 
-- **Auto-detection** — Discovers the running hub LS, its port, and CSRF token automatically (Windows / macOS / Linux), then builds a virtual instance per tracked workspace
-- **Open & track folders** — Configure a default workspace root; existing subfolders appear as available workspaces and bind to the hub instantly via `AddTrackedWorkspace`
-- **Launch the IDE** — Start Antigravity from the Deck when it isn't running
-- **First-run onboarding** — Guided modal to set your workspace root on first launch
+### 🧰 IDE 工具视图
+- **MCP 服务器**：查看已配置的 MCP 服务器、工具清单与连接状态，支持在线启用/禁用。
+- **工作流 / 技能 / 规则**：只读浏览全局与工作区下的 Workflows、Skills、Rules，支持将内置工作流复制到当前工作区编辑。
+- **长期记忆**：查看助手沉淀的持久化 Knowledge Items。
+- **仓库信息**：查看当前工作区 Git 分支状态与待处理的 AI 编辑。
 
-### ⚡ Cascade Control
-- **Status tracking** — Running, idle, or waiting-for-user, per conversation
-- **Permission gates** — When a cascade asks for permission (run a command, edit a file…), the Deck renders exactly the options the IDE offers — built dynamically from the step's `requestedInteraction` spec — so you can approve or reject from the web UI
-- **Auto-accept** — Server-side mode that approves pending interactions across *all* running cascades (with workspace-boundary validation for file edits); read-only operations are always allowed
-- **Cancel** — Stop an active cascade invocation
-- **Token usage** — View generator metadata and token consumption
+### 📊 资源监控与实时日志
+- **系统与进程监控**：每 5 秒采样系统 CPU、内存及各工作区/Deck 前后端进程资源占用，支持历史曲线与一键终止 IDE。
+- **源码管理**：内置只读文件浏览器与 Git Diff 对比（`@git-diff-view` + 30+ 语言高亮），参数数组执行与路径安全校验。
+- **实时日志**：WebSocket 实时查看后端探测、轮询与前端运行日志。
 
-### 🧰 IDE Tools
-Surfaced live from the IDE via the generic LS proxy.
-
-- **MCP Servers** — View connected MCP servers, their tools, and connection status
-- **Workflows** — Browse global and workspace workflows, skills, and rules
-- **Memories** — List the IDE's stored knowledge items
-- **Repo Info** — Workspace and git context for the active workspace
-
-### 📊 Resource Monitor
-Real-time system and per-process resource dashboard (5s sampling).
-
-- **System overview** — CPU, RAM, and per-workspace share in animated donut charts
-- **Per-workspace breakdown** — CPU% and memory for each LS process and its children
-- **Self-monitoring** — Stats for the Deck's own backend (Node.js) and frontend (Next.js) processes, with PIDs
-- **History sparklines** — CPU/RAM trends over a ~5-minute rolling window
-- **Compact sidebar bar** — Mini CPU/RAM bars always visible in the sidebar (click to open the full dashboard)
-- **Kill the IDE** — Terminate Antigravity from the dashboard via a confirm dialog
-- **Cross-platform** — Windows (PowerShell) and macOS/Linux (ps) collectors
-
-### 🔀 Source Control
-Built-in read-only Git viewer with a file explorer.
-
-- **Git status** — Modified, added, deleted, untracked, and renamed files with color-coded badges and per-file add/delete counts
-- **Side-by-side diffs** — Powered by `@git-diff-view`, with syntax highlighting
-- **File explorer** — Tree view of the workspace (skips `node_modules`, `.git`, `.next`, etc.)
-- **Code viewer** — Syntax-highlighted file viewer for 30+ languages
-- **Safe by design** — Git runs via argument arrays (no shell interpolation); file reads are path-validated against the workspace root
-
-### 📜 Live Logs
-- **Real-time backend log stream** — Watch the Deck server's own activity (detection, polling, cascade events) live from the dashboard, no terminal needed
-
-### 👤 Profiles & Account
-- **Multi-account** — Save multiple Antigravity profiles and swap between them (relaunches the IDE with the selected credentials). **Windows-only for now** — on macOS/Linux the API returns 501 and you should switch accounts inside the IDE
-- **Account view** — Name, plan tier, avatar, and credit/quota bar
-
-### 📱 Mobile & PWA
-- **Instant resume** — The last steps and detection state are cached, so reopening on mobile shows data immediately with no loading flash
-- **Smart reconnect** — WebSocket auto-reconnects in the background with a short grace period
-- **Rich push notifications** — Web Push (VAPID) for cascade complete, waiting-for-user, error, and auto-accepted events, each individually toggleable
-- **Installable** — Service worker + install prompt (Chrome/Android and iOS share-sheet instructions)
-
-### 🔒 Security & Remote Access
-- **API-key auth** — `AUTH_KEY` env var gates the API and WebSockets; the frontend shows a login form, and `?key=` URL params auto-authenticate then strip from history
-- **Cloudflare Tunnel** — One command (`npm run online`) generates an auth key, builds the frontend, opens tunnels for backend + frontend, and prints a **QR code** with the auto-login URL embedded
-- **Hardened** — Helmet security headers, rate limiting, request-log redaction, and workspace path validation to prevent traversal and command injection
-
-### 🔌 Integrations & APIs
-Headless integrations for driving Antigravity programmatically (no dashboard panel required).
-
-- **External Agent API** — WebSocket + HTTP/SSE endpoints (`/api/agent/*`, `/ws/agent`) let any external AI agent open a session, send messages, and accept/reject — with concurrent sessions and per-session step limits
-- **Discord bridge** — Optional `discord.js` bot relays a Discord channel to a live cascade (`/help`, `/listws`, `/setws`, @mention routing); auto-starts when configured
-- **Generic LS proxy** — Call whitelisted Language Server methods via `POST /api/ls/:method`
-- **API Tracker** — Local-only tooling (`tools/api-tracker/`) that captures, catalogs, and diffs the LS's Connect-RPC surface (600+ methods) so new IDE APIs can be wired in quickly
-- **Orchestrator** *(experimental, API-only)* — Backend that splits a task into parallel subtasks (`/api/orchestrator/*`, `/ws/orchestrator`); no dashboard UI
-
-### ⚙️ Settings
-- **Default model** — Configure the preferred AI model for new cascades
-- **Default workspace root** — Where new workspaces are opened from
-- **Notification events** — Toggle which cascade events trigger push notifications, with a test button
-- **Dark / Light theme** — Toggle from the sidebar menu
+### 👤 多账号与安全远程访问
+- **多账号切换** *(Windows)*：保存多套 Antigravity 凭据并在面板间一键切换。
+- **API 密钥认证**：通过 `AUTH_KEY` 环境变量保护 HTTP API 与 WebSocket，支持登录弹窗及 `?key=` 自动登录。
+- **Cloudflare 穿透**：`npm run online` 一键启动后端与前端隧道，并生成包含自动登录 URL 的二维码。
+- **PWA 与 Web Push 推送**：支持桌面/手机安装为 PWA，并按事件类型（完成/等待确认/错误/自动批准）推送通知。
 
 ---
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### ⚡ One-Command Setup (Recommended)
+### ⚡ 一键安装 / 更新（推荐）
 
-**No git or npm knowledge needed.** Paste one line — it clones, installs, and goes online with a shareable URL + QR code.
+无需手动配置 Git，直接执行一条命令即可安装、更新并启动服务（默认追踪本中文仓库 `main` 分支，可通过环境变量 `AG_DECK_REF` 指定版本）：
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/tysonnbt/Antigravity-Deck/main/scripts/setup.ps1 | iex
+irm https://raw.githubusercontent.com/ooks37/Antigravity-Deck/main/scripts/setup.ps1 | iex
 ```
 
 **macOS / Linux:**
 ```bash
-curl -sL https://raw.githubusercontent.com/tysonnbt/Antigravity-Deck/main/scripts/setup.sh | bash
+curl -sL https://raw.githubusercontent.com/ooks37/Antigravity-Deck/main/scripts/setup.sh | bash
 ```
 
-> **Prerequisites:** [Node.js 18+](https://nodejs.org/), [Git](https://git-scm.com/), and (for remote access) [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). The setup script checks for these and guides you if anything is missing.
+> **前置依赖：** [Node.js 18+](https://nodejs.org/)、[Git](https://git-scm.com/)；如需公网远程穿透还需安装 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)。
 
-### 🗑️ Uninstall
+### 🗑️ 一键卸载
 
-Removes Antigravity Deck and stops any running instance automatically.
+自动停止相关进程并清理安装目录：
 
 **Windows:**
 ```powershell
-irm https://raw.githubusercontent.com/tysonnbt/Antigravity-Deck/main/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/ooks37/Antigravity-Deck/main/scripts/uninstall.ps1 | iex
 ```
 
 **macOS / Linux:**
 ```bash
-curl -sL https://raw.githubusercontent.com/tysonnbt/Antigravity-Deck/main/scripts/uninstall.sh | bash
+curl -sL https://raw.githubusercontent.com/ooks37/Antigravity-Deck/main/scripts/uninstall.sh | bash
 ```
 
-### 🛠️ Local Development
+### 🛠️ 本地开发
 
 ```bash
-# Install backend + frontend dependencies and create settings.json
+# 安装前后端依赖并初始化 settings.json
 npm run setup
 
-# Start backend (:3500) and frontend (:3000) together with hot-reload
+# 同时启动后端 (:3500) 与前端热重载 (:3000)
 npm run dev
 ```
 
-Open **http://localhost:3000**.
+浏览器打开 **http://localhost:3000** 即可访问。
 
-### 🌐 Remote Access (Cloudflare Tunnel)
+### 🌐 公网远程访问 (Cloudflare Tunnel)
 
 ```bash
 npm run online
 ```
 
-Builds the frontend, starts the servers, opens tunnels for both, and **prints a QR code** with the auto-login URL embedded. Scan it on any device to open the app — no key entry needed.
+自动生成认证密钥、构建前端并拉起双端穿透隧道，在终端打印可直接扫码免密登录的二维码。
 
-### 🔑 With Authentication (local)
+### 🔑 本地开启认证保护
 
 ```bash
 AUTH_KEY=your-secret-key npm run dev
@@ -179,54 +139,26 @@ AUTH_KEY=your-secret-key npm run dev
 
 ---
 
-## 📐 Architecture
+## 📐 系统架构
 
 ```
 ┌────────────────────────┐  JSON + Binary Proto / streams  ┌───────────────┐
 │   Antigravity Hub LS   │ ◄────────────────────────────── │   server.js   │
-│  (single, shared,      │   Connect Protocol (HTTPS/HTTP) │   :3500 API   │
-│   auto-detected)       │   Jetbox + AgentState streams   │   + WS hub    │
-└────────────────────────┘                                  └──────┬────────┘
-                                                                   │ WS (/ws) + HTTP
-   ┌──────────────┐                                          ┌─────┴─────────┐
-   │  Discord Bot │ ◄── /ws/agent + /api/agent (optional) ──│   Next.js     │
-   │  / External  │                                         │   :3000 UI    │
-   │  AI (opt.)   │                                         └───────────────┘
-   └──────────────┘
+│  (单共享 Hub，自动探测)  │   Connect Protocol (HTTPS/HTTP) │   :3500 API   │
+│                        │   Jetbox + AgentState streams   │   + WS hub    │
+└────────────────────────┘                                 └──────┬────────┘
+                                                                  │ WS (/ws) + HTTP
+   ┌──────────────┐                                         ┌─────┴─────────┐
+   │  Discord Bot │ ◄── /ws/agent + /api/agent (可选) ─────│   Next.js     │
+   │  / 外部 AI    │                                         │   :3000 UI    │
+   └──────────────┘                                         └───────────────┘
 ```
 
-- **Backend** (`server.js` + `src/`) — Express API proxy + 3 WebSocket servers (`/ws`, `/ws/agent`, `/ws/orchestrator`), adaptive poller, Jetbox history streams, AgentState streaming (`ls-stream.js`), resource monitor, hub detector, profile manager, and the agent/Discord/orchestrator subsystems. State is in-process plus `settings.json` (no database).
-- **Frontend** (`frontend/`) — Next.js 16 (App Router) + React 19 + shadcn/ui + Tailwind CSS 4. The sidebar groups conversations by project; main panels: Conversation History (default), Chat, Source Control, Resources, Live Logs, MCP Servers, Workflows, Memories, Repo Info, Account, and Settings.
+- **后端** (`server.js` + `src/`)：Express API 代理 + 3 个 WebSocket 服务（`/ws`、`/ws/agent`、`/ws/orchestrator`）、自适应轮询器、Jetbox/AgentState 流、`agy-manager.js` 版本升级管理、资源监控与多账号管理。
+- **前端** (`frontend/`)：Next.js 16 (App Router) + React 19 + shadcn/ui + Tailwind CSS 4，提供完整桌面与移动端控制台体验。
 
 ---
 
-## ⚡ Tech Stack
+## 📄 开源协议
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Node.js 18+ · Express 4 |
-| WebSocket | ws 8 (UI / agent / orchestrator) |
-| Validation | Zod 4 |
-| Security | Helmet 8 · express-rate-limit 8 |
-| Protobuf | protobufjs 8 |
-| Push | web-push (VAPID) |
-| Discord | discord.js 14 |
-| Frontend | Next.js 16 (Turbopack) · React 19 |
-| Components | shadcn/ui (Radix UI) · lucide-react |
-| Styling | Tailwind CSS 4 |
-| Markdown | react-markdown · remark-gfm · rehype-highlight |
-| Diffs | @git-diff-view · diff2html |
-| Language | TypeScript 5 (FE) · JavaScript (BE) |
-| Tunnel | cloudflared |
-
----
-
-## 🙏 Acknowledgments
-
-Thanks to the **Claudible** community for AI quota support and testing 💜
-
----
-
-## 📄 License
-
-MIT
+MIT（上游原项目：[tysonnbt/Antigravity-Deck](https://github.com/tysonnbt/Antigravity-Deck)）

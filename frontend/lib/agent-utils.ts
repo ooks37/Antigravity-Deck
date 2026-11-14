@@ -9,9 +9,9 @@ import {
 // ── Session state → visual config ───────────────────────────────────────
 
 export const SESSION_STATE_CONFIG = {
-    IDLE: { color: 'text-muted-foreground/50', dot: 'bg-muted-foreground/40', label: 'Offline', icon: WifiOff },
-    ACTIVE: { color: 'text-emerald-400', dot: 'bg-emerald-400', label: 'Active', icon: Wifi },
-    TRANSITIONING: { color: 'text-amber-400', dot: 'bg-amber-400 animate-pulse', label: 'Transitioning', icon: RefreshCw },
+    IDLE: { color: 'text-muted-foreground/50', dot: 'bg-muted-foreground/40', label: '未连接', icon: WifiOff },
+    ACTIVE: { color: 'text-emerald-400', dot: 'bg-emerald-400', label: '运行中', icon: Wifi },
+    TRANSITIONING: { color: 'text-amber-400', dot: 'bg-amber-400 animate-pulse', label: '切换中', icon: RefreshCw },
 } as const;
 
 // ── Transport badge colors ──────────────────────────────────────────────
@@ -45,7 +45,7 @@ export const LOG_ICONS: Record<string, typeof Bot> = {
 // ── Timestamp formatter ─────────────────────────────────────────────────
 
 export function formatTimestamp(ts: number): string {
-    return new Date(ts).toLocaleTimeString('vi-VN', {
+    return new Date(ts).toLocaleTimeString('zh-CN', {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
 }

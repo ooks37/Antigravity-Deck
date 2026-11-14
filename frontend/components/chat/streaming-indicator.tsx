@@ -9,7 +9,7 @@ export function StreamingIndicator() {
                     <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '150ms' }} />
                     <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
-                <span className="text-xs text-purple-400/70">Agent is working...</span>
+                <span className="text-xs text-purple-400/70">智能体正在思考与执行...</span>
             </div>
         </div>
     );

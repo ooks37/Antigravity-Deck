@@ -70,7 +70,7 @@ const FileChangeCard = memo(function FileChangeCard({ info, isAccept }: { info: 
             const data = await readFile(filePath);
             setFileContent(data.content);
         } catch (e: any) {
-            setFileError(e.message || 'Failed to load file');
+            setFileError(e.message || '加载文件失败');
         } finally {
             setFileLoading(false);
         }
@@ -106,8 +106,8 @@ const FileChangeCard = memo(function FileChangeCard({ info, isAccept }: { info: 
                     <Tabs value={tab} onValueChange={(v) => handleTabSwitch(v as 'diff' | 'file')}>
                         <div className="flex items-center">
                             <TabsList className="h-8 rounded-none bg-muted/10 border-b border-border/20 w-auto">
-                                <TabsTrigger value="diff" className="text-xs h-full rounded-none">Diff</TabsTrigger>
-                                <TabsTrigger value="file" className="text-xs h-full rounded-none">Full File</TabsTrigger>
+                                <TabsTrigger value="diff" className="text-xs h-full rounded-none">差异对比</TabsTrigger>
+                                <TabsTrigger value="file" className="text-xs h-full rounded-none">完整文件</TabsTrigger>
                             </TabsList>
                             <span className="flex-1" />
                             <span className="text-[10px] text-muted-foreground/40 pr-3 font-mono truncate max-w-[200px]" title={filePath}>{filePath}</span>
@@ -128,7 +128,7 @@ const FileChangeCard = memo(function FileChangeCard({ info, isAccept }: { info: 
 // Diff view
 function DiffView({ lines }: { lines: DiffLine[] }) {
     if (lines.length === 0) {
-        return <div className="px-4 py-3 text-xs text-muted-foreground/60 italic">No diff data available</div>;
+        return <div className="px-4 py-3 text-xs text-muted-foreground/60 italic">暂无差异数据</div>;
     }
 
     let oldLine = 0;
@@ -202,7 +202,7 @@ function FullFileView({ content, loading, error }: { content: string | null; loa
     }
 
     if (content === null) {
-        return <div className="px-4 py-3 text-xs text-muted-foreground/60 italic">Click to load file content</div>;
+        return <div className="px-4 py-3 text-xs text-muted-foreground/60 italic">点击加载文件内容</div>;
     }
 
     const lines = content.split('\n');

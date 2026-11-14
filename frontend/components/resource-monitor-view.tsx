@@ -205,7 +205,7 @@ export function ResourceMonitorView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <Activity className="w-8 h-8 text-muted-foreground/50 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">Loading resource data...</span>
+                    <span className="text-sm text-muted-foreground">正在加载资源数据...</span>
                 </div>
             </div>
         )
@@ -220,9 +220,9 @@ export function ResourceMonitorView() {
                         <Monitor className="w-5 h-5 text-emerald-400" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold">Resource Monitor</h2>
+                        <h2 className="text-lg font-semibold">系统资源监控</h2>
                         <p className="text-xs text-muted-foreground">
-                            System: {system?.cpuCores || 0} cores • {system?.memTotalMB ? `${(system.memTotalMB / 1024).toFixed(1)} GB RAM` : '—'}
+                            系统：{system?.cpuCores || 0} 核心 • {system?.memTotalMB ? `${(system.memTotalMB / 1024).toFixed(1)} GB 内存` : '—'}
                         </p>
                     </div>
                     <div className="ml-auto">
@@ -234,7 +234,7 @@ export function ResourceMonitorView() {
                             {killingIde
                                 ? <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                                 : <Power className="w-3.5 h-3.5" />}
-                            Kill Antigravity
+                            终止 Antigravity
                         </button>
                     </div>
                 </div>
@@ -242,21 +242,21 @@ export function ResourceMonitorView() {
                 {/* System Overview — Donut charts */}
                 <div className="rounded-xl border border-border/50 bg-card/50 p-5">
                     <h3 className="text-sm font-medium text-muted-foreground mb-4 flex items-center gap-2">
-                        <Activity className="w-4 h-4" /> System Overview
+                        <Activity className="w-4 h-4" /> 系统概览
                     </h3>
                     <div className="grid grid-cols-3 gap-6 justify-items-center">
                         <div className="relative">
                             <DonutChart
                                 value={system?.cpuPercent ?? 0}
-                                label="CPU Usage"
-                                sublabel={`${system?.cpuCores ?? 0} cores`}
+                                label="CPU 占用"
+                                sublabel={`${system?.cpuCores ?? 0} 核心`}
                                 color={cpuColor}
                             />
                         </div>
                         <div className="relative">
                             <DonutChart
                                 value={system?.memPercent ?? 0}
-                                label="Memory"
+                                label="内存"
                                 sublabel={`${system?.memUsedMB ? (system.memUsedMB / 1024).toFixed(1) : '0'} / ${system?.memTotalMB ? (system.memTotalMB / 1024).toFixed(1) : '0'} GB`}
                                 color={memColor}
                             />
@@ -264,8 +264,8 @@ export function ResourceMonitorView() {
                         <div className="relative">
                             <DonutChart
                                 value={workspaceList.length > 0 ? (wsTotalMem / (system?.memUsedMB || 1)) * 100 : 0}
-                                label="Workspace Share"
-                                sublabel={`${workspaceList.length} workspace${workspaceList.length !== 1 ? 's' : ''}`}
+                                label="工作区占比"
+                                sublabel={`${workspaceList.length} 个工作区`}
                                 color="hsl(262, 80%, 55%)"
                             />
                         </div>
@@ -276,13 +276,13 @@ export function ResourceMonitorView() {
                 {deckStats && (
                     <div className="rounded-xl border border-border/50 bg-card/50 p-5">
                         <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-                            <Box className="w-4 h-4" /> Antigravity Deck (This App)
+                            <Box className="w-4 h-4" /> Antigravity Deck（本应用）
                         </h3>
                         {/* Column headers */}
                         <div className="grid grid-cols-[1fr_100px_100px_60px] gap-3 px-3 pb-1 text-[10px] text-muted-foreground/50 uppercase tracking-wider font-medium">
-                            <span>Component</span>
+                            <span>组件</span>
                             <span>CPU</span>
-                            <span>Memory</span>
+                            <span>内存</span>
                             <span className="text-right">PID</span>
                         </div>
                         <div className="divide-y divide-border/30">
@@ -290,7 +290,7 @@ export function ResourceMonitorView() {
                             <div className="grid grid-cols-[1fr_100px_100px_60px] items-center gap-3 py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors">
                                 <div className="flex items-center gap-2 min-w-0">
                                     <Server className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                                    <span className="text-sm font-medium">Backend (Node.js)</span>
+                                    <span className="text-sm font-medium">后端服务 (Node.js)</span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <div className="w-full h-2 rounded-full bg-muted/30 overflow-hidden">
@@ -322,7 +322,7 @@ export function ResourceMonitorView() {
                             <div className="grid grid-cols-[1fr_100px_100px_60px] items-center gap-3 py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors">
                                 <div className="flex items-center gap-2 min-w-0">
                                     <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                                    <span className="text-sm font-medium">Frontend (Next.js)</span>
+                                    <span className="text-sm font-medium">前端界面 (Next.js)</span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <div className="w-full h-2 rounded-full bg-muted/30 overflow-hidden">
@@ -353,7 +353,7 @@ export function ResourceMonitorView() {
                         </div>
                         {/* Totals */}
                         <div className="grid grid-cols-[1fr_100px_100px_60px] gap-3 px-3 pt-2 mt-2 border-t border-border/50 text-xs font-medium">
-                            <span className="text-muted-foreground">Total Deck</span>
+                            <span className="text-muted-foreground">Deck 总计</span>
                             <span className="font-mono tabular-nums">{deckStats.totalCpuPercent.toFixed(1)}%</span>
                             <span className="font-mono tabular-nums">{deckStats.totalMemMB} MB</span>
                             <span></span>
@@ -365,12 +365,12 @@ export function ResourceMonitorView() {
                 {cpuHistory.length > 1 && (
                     <div className="rounded-xl border border-border/50 bg-card/50 p-5">
                         <h3 className="text-sm font-medium text-muted-foreground mb-4 flex items-center gap-2">
-                            <HardDrive className="w-4 h-4" /> Usage History
-                            <span className="text-[10px] text-muted-foreground/50 ml-auto">Last {Math.round(cpuHistory.length * 5 / 60)} min</span>
+                            <HardDrive className="w-4 h-4" /> 历史占用
+                            <span className="text-[10px] text-muted-foreground/50 ml-auto">最近 {Math.round(cpuHistory.length * 5 / 60)} 分钟</span>
                         </h3>
                         <div className="space-y-4">
                             <Sparkline data={cpuHistory} color={cpuColor} label="CPU %" />
-                            <Sparkline data={memHistory} color={memColor} label="Memory %" />
+                            <Sparkline data={memHistory} color={memColor} label="内存 %" />
                         </div>
                     </div>
                 )}
@@ -378,21 +378,21 @@ export function ResourceMonitorView() {
                 {/* Per-workspace Breakdown */}
                 <div className="rounded-xl border border-border/50 bg-card/50 p-5">
                     <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-                        <Cpu className="w-4 h-4" /> Workspace Breakdown
+                        <Cpu className="w-4 h-4" /> 工作区资源明细
                     </h3>
 
                     {workspaceList.length === 0 ? (
                         <div className="text-center py-6">
                             <Server className="w-6 h-6 mx-auto text-muted-foreground/30 mb-2" />
-                            <p className="text-sm text-muted-foreground/60">No active workspaces detected</p>
+                            <p className="text-sm text-muted-foreground/60">未检测到活动中的工作区</p>
                         </div>
                     ) : (
                         <>
                             {/* Column headers */}
                             <div className="grid grid-cols-[1fr_100px_100px_60px] gap-3 px-3 pb-1 text-[10px] text-muted-foreground/50 uppercase tracking-wider font-medium">
-                                <span>Workspace</span>
+                                <span>工作区</span>
                                 <span>CPU</span>
-                                <span>Memory</span>
+                                <span>内存</span>
                                 <span className="text-right">PID</span>
                             </div>
                             <div className="divide-y divide-border/30">
@@ -402,7 +402,7 @@ export function ResourceMonitorView() {
                             </div>
                             {/* Totals */}
                             <div className="grid grid-cols-[1fr_100px_100px_60px] gap-3 px-3 pt-2 mt-2 border-t border-border/50 text-xs font-medium">
-                                <span className="text-muted-foreground">Total Antigravity</span>
+                                <span className="text-muted-foreground">Antigravity 总计</span>
                                 <span className="font-mono tabular-nums">{wsTotalCpu.toFixed(1)}%</span>
                                 <span className="font-mono tabular-nums">{wsTotalMem} MB</span>
                                 <span></span>
@@ -413,7 +413,7 @@ export function ResourceMonitorView() {
 
                 {/* Footer info */}
                 <div className="text-center text-[10px] text-muted-foreground/40 pb-4">
-                    Sampling every 5s • {historyData.length} / 60 history points
+                    每 5 秒采样一次 • {historyData.length} / 60 个历史数据点
                 </div>
             </div>
 
@@ -423,17 +423,17 @@ export function ResourceMonitorView() {
                     <AlertDialogHeader>
                         <AlertDialogTitle className="flex items-center gap-2">
                             <AlertTriangle className="h-5 w-5 text-red-400" />
-                            Kill Antigravity IDE
+                            终止 Antigravity IDE
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            This will <span className="font-medium text-red-400">terminate all Antigravity IDE processes</span> on this machine.
-                            All active workspaces ({workspaceList.length}) and any running cascades will be stopped.
+                            此操作将<span className="font-medium text-red-400">终止本机上所有 Antigravity IDE 进程</span>。
+                            所有活动工作区（{workspaceList.length} 个）及正在运行的 Cascade 对话都将被停止。
                             <br /><br />
-                            You can relaunch the IDE from the welcome screen.
+                            之后可在欢迎页重新启动 IDE。
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel className="text-xs">Cancel</AlertDialogCancel>
+                        <AlertDialogCancel className="text-xs">取消</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={async () => {
                                 setShowKillIde(false)
@@ -453,7 +453,7 @@ export function ResourceMonitorView() {
                             className="bg-red-500 hover:bg-red-600 text-white text-xs"
                         >
                             <Power className="h-3.5 w-3.5 mr-1" />
-                            Kill All Processes
+                            终止所有进程
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

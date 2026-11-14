@@ -126,26 +126,26 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
             if (mode === 'new' || !activeCascadeId) {
                 // Start new conversation + send
                 const activeWs = workspaces.find(w => w.workspaceName === targetWorkspace) || workspaces[0];
-                addMessage('system', `[Loading] Creating cascade in ${activeWs?.workspaceName || '?'}...`);
+                addMessage('system', `[加载中] 正在工作区 ${activeWs?.workspaceName || '?'} 中创建对话...`);
                 const result = await cascadeSubmit(text, selectedModelId || undefined, undefined, activeWs?.workspaceName);
                 setActiveCascadeId(result.cascadeId);
                 setMode('continue');
                 onCascadeCreated?.(result.cascadeId);
-                addMessage('system', `[OK] Sent to cascade \`${result.cascadeId.substring(0, 8)}...\` (${activeWs?.workspaceName || '?'})\n\nStatus: ${result.result.status}`, result.cascadeId);
+                addMessage('system', `[完成] 已发送至对话 \`${result.cascadeId.substring(0, 8)}...\` (${activeWs?.workspaceName || '?'})\n\n状态: ${result.result.status}`, result.cascadeId);
                 if (result.result.data) {
                     addMessage('system', result.result.data);
                 }
             } else {
                 // Continue existing conversation
-                addMessage('system', `[Loading] Sending to \`${activeCascadeId.substring(0, 8)}...\``);
+                addMessage('system', `[加载中] 正在发送至 \`${activeCascadeId.substring(0, 8)}...\``);
                 const result = await cascadeSend(activeCascadeId, text, selectedModelId || undefined);
-                addMessage('system', `[OK] Status: ${result.status}`, activeCascadeId);
+                addMessage('system', `[完成] 状态: ${result.status}`, activeCascadeId);
                 if (result.data) {
                     addMessage('system', result.data);
                 }
             }
         } catch (e) {
-            addMessage('error', `[Error] ${e instanceof Error ? e.message : 'Unknown error'}`);
+            addMessage('error', `[错误] ${e instanceof Error ? e.message : '未知错误'}`);
         } finally {
             setLoading(false);
             inputRef.current?.focus();
@@ -162,7 +162,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
     const handleNewConversation = useCallback(() => {
         setActiveCascadeId(null);
         setMode('new');
-        addMessage('system', '[New] Switched to new conversation mode');
+        addMessage('system', '[新建] 已切换至新对话模式');
         onNewConversation?.(); // tell parent to clear currentConvId
     }, [addMessage, onNewConversation]);
 
@@ -199,7 +199,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                         <button
                             onClick={handleNewConversation}
                             className="flex items-center gap-1 h-7 px-2 rounded-md text-[10px] bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
-                            title="Start new conversation"
+                            title="开启新对话"
                         >
                             <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M8 3v10M3 8h10" />
@@ -212,7 +212,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                                 <circle cx="8" cy="8" r="5" />
                                 <path d="M8 5.5v5M5.5 8h5" />
                             </svg>
-                            <span>New</span>
+                            <span>新对话</span>
                         </div>
                     )}
                 </div>
@@ -223,7 +223,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                         <button
                             onClick={() => setWsPickerOpen(v => !v)}
                             className="flex items-center gap-1 h-7 px-2 rounded-md text-[10px] bg-accent/50 text-accent-foreground border border-border hover:bg-accent transition-colors"
-                            title="Switch workspace for cascade"
+                            title="切换目标工作区"
                         >
                             <svg className="w-3 h-3 text-muted-foreground" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                                 <rect x="2" y="3" width="12" height="10" rx="1.5" />
@@ -239,7 +239,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                         {wsPickerOpen && (
                             <div className="absolute bottom-full left-0 mb-1 w-[280px] rounded-lg border border-border bg-popover shadow-xl z-50 py-1">
                                 <div className="px-3 py-1.5 text-[10px] text-muted-foreground font-medium uppercase tracking-wider border-b border-border/50">
-                                    Target Workspace ({workspaces.length})
+                                    目标工作区 ({workspaces.length})
                                 </div>
                                 {workspaces.map((ws) => (
                                     <button
@@ -254,10 +254,10 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                                         <div className="flex-1 min-w-0">
                                             <div className="font-medium truncate">{ws.workspaceName}</div>
                                             <div className="text-[10px] text-muted-foreground/60 font-mono truncate">
-                                                PID:{ws.pid} · Port:{ws.port}
+                                                PID:{ws.pid} · 端口:{ws.port}
                                             </div>
                                         </div>
-                                        {ws.workspaceName === targetWorkspace && <span className="text-[9px] text-emerald-400 font-medium shrink-0">TARGET</span>}
+                                        {ws.workspaceName === targetWorkspace && <span className="text-[9px] text-emerald-400 font-medium shrink-0">当前目标</span>}
                                     </button>
                                 ))}
                             </div>
@@ -271,7 +271,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                         <button
                             onClick={() => setModelPickerOpen(v => !v)}
                             className="flex items-center gap-1 h-7 px-2 rounded-md text-[10px] bg-accent/50 text-accent-foreground border border-border hover:bg-accent transition-colors"
-                            title="Select model"
+                            title="选择模型"
                         >
                             <svg className="w-3 h-3 text-muted-foreground" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                                 <path d="M3 3h10v10H3z" />
@@ -288,7 +288,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                         {modelPickerOpen && (
                             <div className="absolute bottom-full left-0 mb-1 w-[260px] rounded-lg border border-border bg-popover shadow-xl z-50 py-1">
                                 <div className="px-3 py-1.5 text-[10px] text-muted-foreground font-medium uppercase tracking-wider border-b border-border/50">
-                                    Model ({models.length})
+                                    可用模型 ({models.length})
                                 </div>
                                 {(modelGroups.length ? modelGroups : [{ name: '', models }]).map((group, gi) => (
                                     <div key={group.name || `g${gi}`}>
@@ -339,7 +339,7 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder={activeCascadeId ? `Continue cascade ${activeCascadeId.substring(0, 8)}...` : `Send to ${displayWs?.workspaceName || 'Antigravity IDE'}...`}
+                        placeholder={activeCascadeId ? `继续对话 ${activeCascadeId.substring(0, 8)}...` : `发送消息至 ${displayWs?.workspaceName || 'Antigravity IDE'}...`}
                         rows={1}
                         className="w-full resize-none rounded-lg border border-input bg-muted/30 px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors min-h-[36px] max-h-[120px]"
                         style={{ height: 'auto', overflow: 'hidden' }}
@@ -365,14 +365,14 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                                 <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M8 1.5a6.5 6.5 0 105.196 2.616" />
                                 </svg>
-                                <span className="text-xs">Sending</span>
+                                <span className="text-xs">发送中</span>
                             </>
                         ) : (
                             <>
                                 <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M2 8h12M10 4l4 4-4 4" />
                                 </svg>
-                                <span className="text-xs">Send</span>
+                                <span className="text-xs">发送</span>
                             </>
                         )}
                     </Button>

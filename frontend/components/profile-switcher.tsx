@@ -39,7 +39,7 @@ export function ProfileSwitcher() {
         try {
             const result = await autoOnboardProfile();
             if (result.created) {
-                setStatus({ type: 'success', msg: `Account "${result.autoName}" saved automatically` });
+                setStatus({ type: 'success', msg: `已自动保存账号档案 "${result.autoName}"` });
                 await loadProfiles();
             }
         } catch {
@@ -62,13 +62,13 @@ export function ProfileSwitcher() {
 
     const handleSwap = async (target: string) => {
         if (swapping || target === active) return;
-        if (!confirm(`Switch to "${target}"? This will close and restart Antigravity IDE (~10s).`)) return;
+        if (!confirm(`确定切换到 "${target}"？这会关闭并重启 Antigravity IDE（约 10 秒）。`)) return;
         setSwapping(true);
         setStatus(null);
         try {
             const result = await swapProfile(target);
             setActive(result.activeProfile);
-            setStatus({ type: 'success', msg: `Switched to ${target}` });
+            setStatus({ type: 'success', msg: `已切换至 ${target}` });
             loadProfiles();
             // Notify other components to refresh account data
             window.dispatchEvent(new CustomEvent('profile-swapped', { detail: result }));
@@ -79,7 +79,7 @@ export function ProfileSwitcher() {
 
     // Start "Add New Account" — close IDE, launch fresh
     const handleStartAddAccount = async () => {
-        if (!confirm('This will close Antigravity IDE and open a fresh login. Continue?')) return;
+        if (!confirm('此操作将关闭当前 Antigravity IDE 并以空白登录状态重启，是否继续？')) return;
         setSwapping(true);
         setStatus(null);
         try {
@@ -103,10 +103,10 @@ export function ProfileSwitcher() {
             setAwaitingLogin(false);
             setAddingAccount(false);
             loadProfiles();
-            setStatus({ type: 'success', msg: `Account saved as "${name}"` });
+            setStatus({ type: 'success', msg: `账号档案已保存为 "${name}"` });
         } catch (e: any) {
             if (e.message.includes('already saved as profile')) {
-                if (confirm(`${e.message}\n\nSave anyway?`)) return handleSaveNewAccount(true);
+                if (confirm(`${e.message}\n\n仍要覆盖保存吗？`)) return handleSaveNewAccount(true);
                 return;
             }
             setStatus({ type: 'error', msg: e.message });
@@ -123,18 +123,18 @@ export function ProfileSwitcher() {
             setAddingAccount(false);
             setPreviousProfile(null);
             loadProfiles();
-            setStatus({ type: 'success', msg: 'Restored previous account' });
+            setStatus({ type: 'success', msg: '已恢复之前的账号档案' });
         } catch (e: any) {
             setStatus({ type: 'error', msg: e.message });
         } finally { setSwapping(false); }
     };
 
     const handleDelete = async (name: string) => {
-        if (!confirm(`Delete profile "${name}"? This removes all saved data for this account.`)) return;
+        if (!confirm(`确定删除账号档案 "${name}"？该账号保存的所有本地登录状态将被移除。`)) return;
         try {
             await deleteProfileEntry(name);
             loadProfiles();
-            setStatus({ type: 'success', msg: `Profile "${name}" deleted` });
+            setStatus({ type: 'success', msg: `已删除账号档案 "${name}"` });
         } catch (e: any) {
             setStatus({ type: 'error', msg: e.message });
         }
@@ -149,12 +149,12 @@ export function ProfileSwitcher() {
         <div>
             <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <UserCircle className="h-3 w-3" /> Profile Swap
+                    <UserCircle className="h-3 w-3" /> 多账号切换
                 </h3>
                 {/* Add Account button */}
             {!addingAccount && !awaitingLogin && !swapping && (
                     <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={handleStartAddAccount}>
-                        <Plus className="h-3 w-3 mr-1" /> Add Account
+                        <Plus className="h-3 w-3 mr-1" /> 添加账号
                     </Button>
                 )}
             </div>
@@ -163,7 +163,7 @@ export function ProfileSwitcher() {
             {onboarding && (
                 <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 mb-3">
                     <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
-                    <span className="text-xs text-indigo-400 font-medium">Detecting IDE account...</span>
+                    <span className="text-xs text-indigo-400 font-medium">正在识别 IDE 当前登录账号...</span>
                 </div>
             )}
 
@@ -171,11 +171,11 @@ export function ProfileSwitcher() {
             {profiles.length === 0 && !onboarding && (
                 <div className="mb-3">
                     <p className="text-xs text-muted-foreground mb-2">
-                        No profiles saved yet. Save your current IDE account to enable swapping between Google accounts.
+                        尚未保存任何账号档案。保存当前 IDE 账号后即可随时在多个 Google 账号之间无缝切换（当前仅支持 Windows）。
                     </p>
                     {!addingAccount && (
                         <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => setAddingAccount(true)}>
-                            <Plus className="h-3 w-3 mr-1" /> Save Current Account
+                            <Plus className="h-3 w-3 mr-1" /> 保存当前账号
                         </Button>
                     )}
                 </div>
@@ -185,7 +185,7 @@ export function ProfileSwitcher() {
             {swapping && (
                 <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 mb-3">
                     <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
-                    <span className="text-xs text-amber-400 font-medium">Swapping account... IDE will restart (~10s)</span>
+                    <span className="text-xs text-amber-400 font-medium">正在切换账号并重启 IDE（约需 10 秒）...</span>
                 </div>
             )}
 
@@ -205,7 +205,7 @@ export function ProfileSwitcher() {
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                                 <span className="text-xs font-medium">{activeProfile.meta?.userName || activeProfile.name}</span>
-                                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[9px] h-4 px-1.5">ACTIVE</Badge>
+                                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[9px] h-4 px-1.5">当前使用</Badge>
                                 {activeProfile.meta?.tier && (
                                     <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-indigo-500/30 text-indigo-400">{activeProfile.meta.tier}</Badge>
                                 )}
@@ -234,7 +234,7 @@ export function ProfileSwitcher() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
                         <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => handleSwap(p.name)} disabled={swapping}>
-                            <ArrowLeftRight className="h-3 w-3 mr-1" /> Swap
+                            <ArrowLeftRight className="h-3 w-3 mr-1" /> 切换
                         </Button>
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-400" onClick={() => handleDelete(p.name)} disabled={swapping}>
                             <Trash2 className="h-3 w-3" />
@@ -247,17 +247,17 @@ export function ProfileSwitcher() {
             {!active && profiles.length > 0 && !awaitingLogin && !onboarding && (
                 <div className="mt-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
                     <p className="text-xs text-amber-400 font-medium mb-2">
-                        🔑 New account detected! Save it as a profile to enable swapping:
+                        🔑 检测到未归档的新账号，请命名并保存以启用快速切换：
                     </p>
                     <div className="flex items-center gap-2">
                         <Input
                             value={newName} onChange={e => setNewName(e.target.value)}
-                            placeholder="Profile name (e.g. work, personal...)"
+                            placeholder="档案别名（仅限英文/数字，如 work, personal）"
                             className="h-7 text-xs flex-1" autoFocus
                             onKeyDown={e => { if (e.key === 'Enter') handleSaveNewAccount(); }}
                         />
                         <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => handleSaveNewAccount()} disabled={!newName.trim() || swapping}>
-                            Save
+                            保存
                         </Button>
                     </div>
                 </div>
@@ -267,20 +267,20 @@ export function ProfileSwitcher() {
             {awaitingLogin && (
                 <div className="mt-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
                     <p className="text-xs text-amber-400 font-medium mb-2">
-                        🔑 Log into your new Google account in the IDE window, then save it below:
+                        🔑 请在重启后的 Antigravity IDE 中登录新的 Google 账号，然后在下方保存：
                     </p>
                     <div className="flex items-center gap-2">
                         <Input
                             value={newName} onChange={e => setNewName(e.target.value)}
-                            placeholder="Profile name (e.g. work, personal...)"
+                            placeholder="档案别名（仅限英文/数字，如 work, personal）"
                             className="h-7 text-xs flex-1" autoFocus
                             onKeyDown={e => { if (e.key === 'Enter') handleSaveNewAccount(); if (e.key === 'Escape') handleCancelAdd(); }}
                         />
                         <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => handleSaveNewAccount()} disabled={!newName.trim() || swapping}>
-                            Save
+                            保存
                         </Button>
                         <Button variant="ghost" size="sm" className="h-7 text-[10px] text-muted-foreground" onClick={handleCancelAdd} disabled={swapping}>
-                            Cancel
+                            取消
                         </Button>
                     </div>
                 </div>

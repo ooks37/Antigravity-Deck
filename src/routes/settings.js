@@ -11,6 +11,7 @@ const SettingsSchema = z.object({
     defaultModel: z.string().max(100).optional(),
     activeProfile: z.string().max(100).nullable().optional(),
     profilesDir: z.string().max(500).nullable().optional(),
+    agyBinaryPath: z.string().max(500).optional(),
     notifications: z.object({
         enabled: z.boolean().optional(),
         events: z.object({

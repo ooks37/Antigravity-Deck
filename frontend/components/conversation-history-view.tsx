@@ -64,13 +64,13 @@ export function ConversationHistoryView({ currentConvId, version, onSelectConver
             {/* Left: Projects filter */}
             <div className="w-56 shrink-0 border-r border-border/40 flex flex-col min-h-0 hidden md:flex">
                 <div className="px-3 py-3 text-xs font-semibold text-muted-foreground flex items-center gap-2">
-                    <FolderGit2 className="w-3.5 h-3.5" /> Projects
+                    <FolderGit2 className="w-3.5 h-3.5" /> 项目筛选
                 </div>
                 <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
                     <ProjectButton
                         active={activeProject === null}
                         icon={<HistoryIcon className="w-3.5 h-3.5" />}
-                        label="All conversations"
+                        label="全部对话"
                         count={rows.length}
                         onClick={() => setActiveProject(null)}
                     />
@@ -88,7 +88,7 @@ export function ConversationHistoryView({ currentConvId, version, onSelectConver
                         <ProjectButton
                             active={activeProject === OUTSIDE_PROJECT}
                             icon={<Inbox className="w-3.5 h-3.5" />}
-                            label="Other"
+                            label="其他独立对话"
                             count={looseCount}
                             onClick={() => setActiveProject(OUTSIDE_PROJECT)}
                         />
@@ -99,13 +99,13 @@ export function ConversationHistoryView({ currentConvId, version, onSelectConver
             {/* Right: search + list */}
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <div className="px-4 sm:px-6 pt-5 pb-3 shrink-0">
-                    <h1 className="text-xl font-semibold mb-3">Conversation History</h1>
+                    <h1 className="text-xl font-semibold mb-3">历史对话记录</h1>
                     <div className="relative max-w-2xl">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
                         <input
                             value={q}
                             onChange={e => setQ(e.target.value)}
-                            placeholder="Search conversations..."
+                            placeholder="搜索对话标题或项目名..."
                             className="w-full h-9 pl-9 pr-3 rounded-lg bg-muted/40 border border-border/50 text-sm outline-none focus:border-primary/50 transition-colors"
                         />
                     </div>
@@ -114,11 +114,11 @@ export function ConversationHistoryView({ currentConvId, version, onSelectConver
                 <div className="flex-1 overflow-y-auto px-2 sm:px-4 pb-6">
                     {loading ? (
                         <div className="flex items-center justify-center py-16 text-muted-foreground text-sm gap-2">
-                            <Loader2 className="w-4 h-4 animate-spin" /> Loading history...
+                            <Loader2 className="w-4 h-4 animate-spin" /> 正在加载历史记录...
                         </div>
                     ) : filtered.length === 0 ? (
                         <div className="text-center py-16 text-sm text-muted-foreground/60">
-                            {rows.length === 0 ? 'No conversations found.' : 'No conversations match your filter.'}
+                            {rows.length === 0 ? '暂无历史对话。' : '没有符合筛选条件的对话。'}
                         </div>
                     ) : (
                         <div className="max-w-3xl mx-auto divide-y divide-border/30">
@@ -139,7 +139,7 @@ export function ConversationHistoryView({ currentConvId, version, onSelectConver
                                         )}
                                     </div>
                                     {r.stepCount > 0 && (
-                                        <span className="text-[10px] text-muted-foreground/40 shrink-0 hidden sm:inline">{r.stepCount} steps</span>
+                                        <span className="text-[10px] text-muted-foreground/40 shrink-0 hidden sm:inline">{r.stepCount} 步</span>
                                     )}
                                     <span className="text-[11px] text-muted-foreground/50 shrink-0 w-10 text-right">{relTime(r.lastModified)}</span>
                                 </button>

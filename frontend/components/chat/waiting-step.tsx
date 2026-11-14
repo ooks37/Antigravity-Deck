@@ -67,17 +67,17 @@ function PermissionGate({ spec, cascadeId, originalIndex, onDone }: {
         return () => { alive = false; };
     }, [cascadeId]);
 
-    const action = gate?.action || spec.resource?.action || 'access';
+    const action = gate?.action || spec.resource?.action || '访问';
     const target = gate?.target || spec.resource?.target || '';
-    const title = gate?.title || `Allow ${action}?`;
+    const title = gate?.title || `允许${action}？`;
     const reason = gate?.reason || spec.reason || '';
 
     // Backend-computed options, or a safe fallback (allow once / always / deny).
     const options = gate?.options ?? [
-        { id: 'once', label: 'Yes, allow this time', payload: { permission: { allow: true } } },
-        { id: 'global', label: 'Yes, and always allow', payload: { permission: { allow: true, turnGrants: { allow: [`${action}(${target})`], deny: [] } } } },
+        { id: 'once', label: '是，仅本次允许', payload: { permission: { allow: true } } },
+        { id: 'global', label: '是，始终允许', payload: { permission: { allow: true, turnGrants: { allow: [`${action}(${target})`], deny: [] } } } },
     ];
-    const denyWriteIn = gate?.denyWriteIn ?? { label: 'No', placeholder: '(tell the agent what to do instead)' };
+    const denyWriteIn = gate?.denyWriteIn ?? { label: '拒绝', placeholder: '（告诉智能体应该改用什么方式）' };
 
     const submitDeny = () => send({ permission: { allow: false, ...(denyText.trim() ? { userDenyInstruction: denyText.trim() } : {}) } });
 
@@ -124,9 +124,9 @@ function PermissionGate({ spec, cascadeId, originalIndex, onDone }: {
                     <div className="flex items-center gap-3">
                         <Button onClick={submitDeny} disabled={acting} className="gap-2">
                             {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                            Send to agent
+                            发送指令给智能体
                         </Button>
-                        <Button variant="ghost" onClick={() => setDenyOpen(false)} disabled={acting}>Back</Button>
+                        <Button variant="ghost" onClick={() => setDenyOpen(false)} disabled={acting}>返回</Button>
                     </div>
                 </div>
             )}
@@ -174,7 +174,7 @@ function AskQuestionGate({ spec, cascadeId, originalIndex, onDone }: {
     const skip = () => send({ askQuestion: { cancelled: true } });
 
     return (
-        <GateCard icon={<HelpCircle className="h-4 w-4" />} title="Question from Agent" originalIndex={originalIndex}>
+        <GateCard icon={<HelpCircle className="h-4 w-4" />} title="智能体提问" originalIndex={originalIndex}>
             <div className="space-y-4">
                 {questions.map((q, qi) => (
                     <div key={qi}>
@@ -215,7 +215,7 @@ function AskQuestionGate({ spec, cascadeId, originalIndex, onDone }: {
                             value={writeIns[qi] || ''}
                             disabled={acting}
                             onChange={e => setWriteIns(prev => ({ ...prev, [qi]: e.target.value }))}
-                            placeholder={(q.options?.length || 0) > 0 ? 'Or write your own answer…' : 'Type your answer…'}
+                            placeholder={(q.options?.length || 0) > 0 ? '或自行输入回答…' : '请输入你的回答…'}
                             className="mt-2 w-full bg-muted/40 border border-border rounded-md px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/60"
                         />
                     </div>
@@ -224,11 +224,11 @@ function AskQuestionGate({ spec, cascadeId, originalIndex, onDone }: {
             <div className="flex items-center gap-3 mt-4">
                 <Button onClick={submit} disabled={acting || !canSubmit} className="gap-2">
                     {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Submit
+                    提交
                 </Button>
                 <Button variant="outline" onClick={skip} disabled={acting} className="gap-2">
                     <X className="h-4 w-4" />
-                    Skip
+                    跳过
                 </Button>
             </div>
         </GateCard>
@@ -250,13 +250,13 @@ function ElicitationGate({ spec, cascadeId, originalIndex, onDone }: {
 
     const accept = () => {
         if (hasSchema) {
-            try { JSON.parse(contentJson); } catch { setJsonError('Invalid JSON'); return; }
+            try { JSON.parse(contentJson); } catch { setJsonError('JSON 格式无效'); return; }
         }
         send({ elicitation: { action: 'accept', ...(hasSchema ? { contentJson } : {}) } });
     };
 
     return (
-        <GateCard icon={<MessageSquare className="h-4 w-4" />} title={`Input Requested${spec.serverName ? ` — ${spec.serverName}` : ''}`} originalIndex={originalIndex}>
+        <GateCard icon={<MessageSquare className="h-4 w-4" />} title={`请求输入${spec.serverName ? ` — ${spec.serverName}` : ''}`} originalIndex={originalIndex}>
             {spec.message && (
                 <div className="bg-muted rounded-md p-4 text-sm text-foreground border border-border whitespace-pre-wrap break-words">
                     {spec.message}
@@ -265,7 +265,7 @@ function ElicitationGate({ spec, cascadeId, originalIndex, onDone }: {
             {spec.url && <div className="mt-2 text-xs font-mono text-muted-foreground break-all">{spec.url}</div>}
             {hasSchema && (
                 <div className="mt-3">
-                    <div className="text-[10px] text-muted-foreground mb-1">Response JSON (schema: <span className="font-mono">{spec.requestedSchemaJson!.slice(0, 120)}{spec.requestedSchemaJson!.length > 120 ? '…' : ''}</span>)</div>
+                    <div className="text-[10px] text-muted-foreground mb-1">响应 JSON (结构定义: <span className="font-mono">{spec.requestedSchemaJson!.slice(0, 120)}{spec.requestedSchemaJson!.length > 120 ? '…' : ''}</span>)</div>
                     <textarea
                         value={contentJson}
                         disabled={acting}
@@ -279,14 +279,14 @@ function ElicitationGate({ spec, cascadeId, originalIndex, onDone }: {
             <div className="flex items-center gap-3 mt-4">
                 <Button onClick={accept} disabled={acting} className="gap-2">
                     {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Accept
+                    接受
                 </Button>
                 <Button variant="outline" onClick={() => send({ elicitation: { action: 'decline' } })} disabled={acting} className="gap-2">
                     <X className="h-4 w-4" />
-                    Decline
+                    拒绝
                 </Button>
                 <Button variant="ghost" onClick={() => send({ elicitation: { action: 'cancel' } })} disabled={acting}>
-                    Cancel
+                    取消
                 </Button>
             </div>
         </GateCard>
@@ -307,7 +307,7 @@ function GateCard({ icon, title, originalIndex, children }: {
                 <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm text-muted-foreground">{icon}</span>
                     <span className="text-sm font-medium text-foreground">{title}</span>
-                    <span className="text-[10px] font-mono ml-auto text-muted-foreground/60">step #{originalIndex + 1}</span>
+                    <span className="text-[10px] font-mono ml-auto text-muted-foreground/60">步骤 #{originalIndex + 1}</span>
                     <span className="w-2 h-2 rounded-full animate-pulse bg-amber-400" />
                 </div>
                 {children}
@@ -393,17 +393,17 @@ export const WaitingStep = memo(function WaitingStep({ step, originalIndex, casc
 
     // Determine display info
     const icon = isCommand ? <Zap className="h-4 w-4" /> : (isFileAccess || isCodeAction) ? <FolderOpen className="h-4 w-4" /> : isTermInput ? <Keyboard className="h-4 w-4" /> : <Bell className="h-4 w-4" />;
-    const title = isCommand ? 'Terminal Command'
-        : isFileAccess ? 'File Access'
-            : isCodeAction ? 'Code Action (File Permission?)'
-                : isTermInput ? 'Terminal Input'
+    const title = isCommand ? '终端命令'
+        : isFileAccess ? '文件访问权限'
+            : isCodeAction ? '代码操作（文件权限）'
+                : isTermInput ? '终端输入'
                     : stepType.replace(/_/g, ' ');
     const displayContent = isCommand ? command
         : isFileAccess ? filePath
             : isTermInput ? termInput
                 : '';
     const AcceptIcon = isCommand || isTermInput ? Play : Check;
-    const acceptLabel = isCommand ? 'Run' : (isFileAccess || isCodeAction) ? 'Allow' : isTermInput ? 'Send' : 'Allow';
+    const acceptLabel = isCommand ? '运行' : (isFileAccess || isCodeAction) ? '允许' : isTermInput ? '发送' : '允许';
 
     const handleAction = async (action: 'accept' | 'reject') => {
         if (!cascadeId || acting) return;
@@ -435,7 +435,7 @@ export const WaitingStep = memo(function WaitingStep({ step, originalIndex, casc
                 <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm text-muted-foreground">{icon}</span>
                     <span className="text-sm font-medium text-foreground">{title}</span>
-                    <span className="text-[10px] font-mono ml-auto text-muted-foreground/60">step #{originalIndex + 1}</span>
+                    <span className="text-[10px] font-mono ml-auto text-muted-foreground/60">步骤 #{originalIndex + 1}</span>
                     <span className="w-2 h-2 rounded-full animate-pulse bg-amber-400" />
                 </div>
 
@@ -451,7 +451,7 @@ export const WaitingStep = memo(function WaitingStep({ step, originalIndex, casc
                 {/* Debug: show raw step data when content extraction fails */}
                 {!displayContent && debugData && (
                     <div className="mt-3">
-                        <div className="text-[10px] text-amber-400/60 mb-1 font-semibold"><AlertTriangle className="h-3 w-3 inline mr-1" /> Debug: Raw step data (file path not found)</div>
+                        <div className="text-[10px] text-amber-400/60 mb-1 font-semibold"><AlertTriangle className="h-3 w-3 inline mr-1" /> 调试信息：原始步骤数据（未找到文件路径）</div>
                         <pre className="bg-muted rounded-md p-3 font-mono text-[10px] text-muted-foreground border border-border max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
                             {debugData}
                         </pre>
@@ -477,7 +477,7 @@ export const WaitingStep = memo(function WaitingStep({ step, originalIndex, casc
                         className="gap-2"
                     >
                         <X className="h-4 w-4" />
-                        Reject
+                        拒绝
                     </Button>
                 </div>
             </div>

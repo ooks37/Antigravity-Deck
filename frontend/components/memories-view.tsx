@@ -35,7 +35,7 @@ function itemDisplayName(item: KnowledgeItem): string {
         const parts = item.dirUri.replace(/\/$/, '').split('/');
         return parts[parts.length - 1] ?? item.dirUri;
     }
-    return '(unnamed)';
+    return '（未命名）';
 }
 
 /** Extract a short summary from metadataContents (first non-empty line). */
@@ -63,13 +63,13 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
         <div className="flex items-center justify-center py-16">
             <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                 <AlertTriangle className="w-6 h-6 text-red-400/60" />
-                <span className="text-sm font-medium text-foreground/70">Failed to load</span>
+                <span className="text-sm font-medium text-foreground/70">加载失败</span>
                 <span className="text-xs text-muted-foreground font-mono break-all">{message}</span>
                 <button
                     onClick={onRetry}
                     className="text-xs px-3 py-1.5 rounded-lg bg-muted/40 hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors border border-border/30"
                 >
-                    Retry
+                    重试
                 </button>
             </div>
         </div>
@@ -80,9 +80,9 @@ function EmptyState() {
     return (
         <div className="rounded-xl border border-border/50 bg-card/50 p-10 text-center">
             <Brain className="w-8 h-8 mx-auto text-muted-foreground/20 mb-3" />
-            <p className="text-sm font-medium text-muted-foreground/60 mb-1">No knowledge items found</p>
+            <p className="text-sm font-medium text-muted-foreground/60 mb-1">未找到知识记忆条目</p>
             <p className="text-xs text-muted-foreground/40 max-w-xs mx-auto">
-                Knowledge items appear here once the agent stores persistent memory artifacts.
+                当助手保存持久化记忆产物后，相关知识条目将显示在此处。
             </p>
         </div>
     );
@@ -104,7 +104,7 @@ function KnowledgeItemRow({ item }: { item: KnowledgeItem }) {
                         <span className="text-sm font-medium truncate">{name}</span>
                         {sourceCount > 0 && (
                             <span className="text-[9px] font-medium text-muted-foreground/50 bg-muted/40 px-1 py-0.5 rounded shrink-0">
-                                {sourceCount} source{sourceCount !== 1 ? 's' : ''}
+                                {sourceCount} 个来源
                             </span>
                         )}
                     </div>
@@ -116,7 +116,7 @@ function KnowledgeItemRow({ item }: { item: KnowledgeItem }) {
                     )}
                 </div>
                 <Badge className="text-[9px] h-5 px-1.5 bg-muted/30 text-muted-foreground border border-border/20 hover:bg-muted/30 shrink-0 mt-0.5">
-                    knowledge
+                    知识库
                 </Badge>
             </div>
         </div>
@@ -147,7 +147,7 @@ export function MemoriesView() {
             })
             .catch((e: unknown) => {
                 if (isAbortError(e)) return;
-                setError(e instanceof Error ? e.message : 'Failed to load knowledge items');
+                setError(e instanceof Error ? e.message : '加载知识条目失败');
                 setIsLoading(false);
             });
     }, []);
@@ -164,7 +164,7 @@ export function MemoriesView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <Brain className="w-8 h-8 text-muted-foreground/50 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">Loading memories...</span>
+                    <span className="text-sm text-muted-foreground">正在加载记忆...</span>
                 </div>
             </div>
         );
@@ -175,13 +175,13 @@ export function MemoriesView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                     <AlertTriangle className="w-8 h-8 text-red-400/60" />
-                    <span className="text-sm font-medium text-foreground/70">Failed to load memories</span>
+                    <span className="text-sm font-medium text-foreground/70">加载记忆失败</span>
                     <span className="text-xs text-muted-foreground font-mono break-all">{error}</span>
                     <button
                         onClick={() => fetchData()}
                         className="text-xs px-3 py-1.5 rounded-lg bg-muted/40 hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors border border-border/30"
                     >
-                        Retry
+                        重试
                     </button>
                 </div>
             </div>
@@ -199,11 +199,11 @@ export function MemoriesView() {
                         <Brain className="w-5 h-5 text-violet-400" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold">Memories</h2>
+                        <h2 className="text-lg font-semibold">长期记忆</h2>
                         <p className="text-xs text-muted-foreground">
                             {itemList.length === 0
-                                ? 'No knowledge items stored'
-                                : `${itemList.length} knowledge item${itemList.length !== 1 ? 's' : ''}`}
+                                ? '尚未存储任何知识条目'
+                                : `共 ${itemList.length} 条知识记忆`}
                         </p>
                     </div>
                     {isLoading && (
@@ -217,8 +217,8 @@ export function MemoriesView() {
                 ) : (
                     <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
                         <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-2 text-[10px] text-muted-foreground/50 uppercase tracking-wider font-medium border-b border-border/30 bg-muted/10">
-                            <span>Knowledge Item</span>
-                            <span>Type</span>
+                            <span>知识条目</span>
+                            <span>类型</span>
                         </div>
                         <div className="divide-y divide-border/20">
                             {itemList.map((item, i) => (
@@ -230,7 +230,7 @@ export function MemoriesView() {
 
                 {/* Footer */}
                 <p className="text-center text-[10px] text-muted-foreground/40 pb-4">
-                    Read-only view — knowledge items are managed automatically by the agent
+                    只读视图 — 知识条目由助手在对话过程中自动管理
                 </p>
             </div>
         </div>

@@ -23,8 +23,8 @@ export function CreditCard({ label, icon, used, available, total, pct }: {
                 )} style={{ width: `${pct}%` }} />
             </div>
             <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">{pct}% remaining</span>
-                <span className="text-[10px] text-muted-foreground">{used.toLocaleString()} used</span>
+                <span className="text-[10px] text-muted-foreground">剩余 {pct}%</span>
+                <span className="text-[10px] text-muted-foreground">已用 {used.toLocaleString()}</span>
             </div>
         </div>
     );

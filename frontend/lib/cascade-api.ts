@@ -93,6 +93,7 @@ export interface WorkspaceFolder {
 export interface AppSettings {
     defaultWorkspaceRoot: string;
     defaultModel: string;
+    agyBinaryPath?: string;
     [key: string]: unknown;
 }
 
@@ -475,5 +476,74 @@ export async function lsCall<T = unknown>(method: string, body: Record<string, u
     });
     if (!res.ok) throw new Error(`LS ${method} failed: ${res.status}`);
     return res.json();
+}
+
+// === Antigravity CLI (agy) Management ===
+export interface AgyUpdateRecord {
+    success: boolean;
+    previousVersion: string | null;
+    version: string | null;
+    updated: boolean;
+    output?: string;
+    error?: string;
+}
+
+export interface AgyStatus {
+    found: boolean;
+    path: string | null;
+    configuredPath: string;
+    source: string | null;
+    version: string | null;
+    platform: string;
+    updating: boolean;
+    lastUpdateAt: string | null;
+    lastUpdateResult: AgyUpdateRecord | null;
+    error?: string;
+}
+
+export interface AgyChangelog {
+    found: boolean;
+    path?: string | null;
+    latestEntryVersion: string | null;
+    text: string;
+    truncated: boolean;
+    totalLines: number;
+    error?: string;
+}
+
+export interface AgyUpdateResult {
+    success: boolean;
+    inProgress?: boolean;
+    path?: string | null;
+    previousVersion?: string | null;
+    version?: string | null;
+    updated?: boolean;
+    output?: string;
+    checkedAt?: string;
+    error?: string;
+}
+
+export async function getAgyStatus(refresh = true): Promise<AgyStatus> {
+    const res = await fetch(`${API_BASE}/api/agy/status?refresh=${refresh ? 'true' : 'false'}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`获取 agy 状态失败: ${res.status}`);
+    return res.json();
+}
+
+export async function getAgyChangelog(limit = 120): Promise<AgyChangelog> {
+    const res = await fetch(`${API_BASE}/api/agy/changelog?limit=${limit}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`读取 agy 更新日志失败: ${res.status}`);
+    return res.json();
+}
+
+export async function triggerAgyUpdate(): Promise<AgyUpdateResult> {
+    const res = await fetch(`${API_BASE}/api/agy/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && data.success === undefined) {
+        throw new Error(data.error || `更新 agy 失败: ${res.status}`);
+    }
+    return data;
 }
 

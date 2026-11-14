@@ -34,11 +34,11 @@ export function StepDetail({ step, index, open, onClose, onNavigate, totalSteps,
         if (!step?.metadata) return {};
         const m = step.metadata;
         const result: Record<string, string> = {};
-        if (m.name) result['Tool'] = m.name;
-        if (m.createdAt) result['Created'] = new Date(m.createdAt).toLocaleString();
-        if (m.generatorModel) result['Model'] = m.generatorModel;
-        if (m.toolCallOutputTokens) result['Output Tokens'] = String(m.toolCallOutputTokens);
-        if (m.requestedModel?.model) result['Requested Model'] = m.requestedModel.model;
+        if (m.name) result['工具'] = m.name;
+        if (m.createdAt) result['创建时间'] = new Date(m.createdAt).toLocaleString('zh-CN');
+        if (m.generatorModel) result['模型'] = m.generatorModel;
+        if (m.toolCallOutputTokens) result['输出 Token'] = String(m.toolCallOutputTokens);
+        if (m.requestedModel?.model) result['请求模型'] = m.requestedModel.model;
         return result;
     }, [step]);
 
@@ -79,13 +79,13 @@ export function StepDetail({ step, index, open, onClose, onNavigate, totalSteps,
                 {/* Navigation + Actions */}
                 <div className="flex items-center justify-between mt-4 mb-3">
                     <div className="flex items-center gap-1">
-                        <Button variant="outline" size="sm" onClick={() => onNavigate('prev')} disabled={index === 0}>← Prev</Button>
-                        <Button variant="outline" size="sm" onClick={() => onNavigate('next')} disabled={index >= totalSteps - 1}>Next →</Button>
+                        <Button variant="outline" size="sm" onClick={() => onNavigate('prev')} disabled={index === 0}>← 上一步</Button>
+                        <Button variant="outline" size="sm" onClick={() => onNavigate('next')} disabled={index >= totalSteps - 1}>下一步 →</Button>
                         <span className="text-xs text-muted-foreground ml-2">{index + 1} / {totalSteps}</span>
                     </div>
                     <div className="flex items-center gap-1">
                         <Button variant="ghost" size="sm" onClick={onToggleBookmark}><Star className={cn("h-4 w-4", isBookmarked ? "fill-yellow-500 text-yellow-500" : "text-muted-foreground")} /></Button>
-                        <Button variant="ghost" size="sm" onClick={handleCopy}>{copied ? <><Check className="h-3 w-3 mr-1 inline" />Copied</> : <><Copy className="h-3 w-3 mr-1 inline" />Copy</>}</Button>
+                        <Button variant="ghost" size="sm" onClick={handleCopy}>{copied ? <><Check className="h-3 w-3 mr-1 inline" />已复制</> : <><Copy className="h-3 w-3 mr-1 inline" />复制</>}</Button>
                     </div>
                 </div>
 
@@ -94,10 +94,10 @@ export function StepDetail({ step, index, open, onClose, onNavigate, totalSteps,
                 {/* Tabs */}
                 <Tabs defaultValue="content">
                     <TabsList className="w-full">
-                        <TabsTrigger value="content" className="flex-1">Content</TabsTrigger>
-                        <TabsTrigger value="metadata" className="flex-1">Metadata</TabsTrigger>
-                        {rawArgs && <TabsTrigger value="args" className="flex-1">Arguments</TabsTrigger>}
-                        {rawResult && <TabsTrigger value="result" className="flex-1">Result</TabsTrigger>}
+                        <TabsTrigger value="content" className="flex-1">内容</TabsTrigger>
+                        <TabsTrigger value="metadata" className="flex-1">元数据</TabsTrigger>
+                        {rawArgs && <TabsTrigger value="args" className="flex-1">调用参数</TabsTrigger>}
+                        {rawResult && <TabsTrigger value="result" className="flex-1">返回结果</TabsTrigger>}
                     </TabsList>
 
                     <TabsContent value="content" className="mt-3">
@@ -107,7 +107,7 @@ export function StepDetail({ step, index, open, onClose, onNavigate, totalSteps,
                     <TabsContent value="metadata" className="mt-3">
                         <div className="space-y-2">
                             <div className="grid grid-cols-2 gap-2">
-                                <div className="text-xs text-muted-foreground">Type</div>
+                                <div className="text-xs text-muted-foreground">类型</div>
                                 <div className="text-xs font-mono">{step.type?.replace('CORTEX_STEP_TYPE_', '')}</div>
                                 {Object.entries(metadata).map(([key, val]) => (
                                     <div key={key} className="contents">
@@ -130,7 +130,7 @@ export function StepDetail({ step, index, open, onClose, onNavigate, totalSteps,
                     {rawResult && (
                         <TabsContent value="result" className="mt-3">
                             <pre className="text-xs font-mono bg-black/30 rounded-lg p-3 overflow-auto max-h-96 border border-border whitespace-pre-wrap break-all">
-                                {rawResult.substring(0, 5000)}{rawResult.length > 5000 ? '\n... (truncated)' : ''}
+                                {rawResult.substring(0, 5000)}{rawResult.length > 5000 ? '\n... (已截断)' : ''}
                             </pre>
                         </TabsContent>
                     )}

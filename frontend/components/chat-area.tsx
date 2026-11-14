@@ -82,7 +82,7 @@ function UserMessage({ step, index, searchQuery, onStepClick, isBookmarked }: {
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2.5">
                     <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-sm"><User className="h-3.5 w-3.5 text-blue-400" /></div>
-                    <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">User</span>
+                    <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">用户</span>
                     <Badge variant="secondary" className="text-[9px] font-mono h-4 px-1.5 bg-blue-500/10 text-blue-400/70 border-blue-500/20">{tag}</Badge>
                 </div>
                 <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -117,7 +117,7 @@ function AgentResponse({ step, index, searchQuery, onStepClick, isBookmarked }: 
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2.5">
                     <div className="w-7 h-7 rounded-full bg-purple-500/20 flex items-center justify-center text-sm"><Bot className="h-3.5 w-3.5 text-purple-400" /></div>
-                    <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">Agent</span>
+                    <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">智能体</span>
                     <Badge variant="secondary" className="text-[9px] font-mono h-4 px-1.5 bg-purple-500/10 text-purple-400/70 border-purple-500/20">{tag}</Badge>
                 </div>
                 <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -166,7 +166,7 @@ function ProcessingGroup({ steps: groupSteps, searchQuery, onStepClick, bookmark
             >
                 <span className={cn('transition-transform duration-200 text-muted-foreground', expanded && 'rotate-90')}><ChevronRight className="w-3 h-3" /></span>
                 <span className="text-muted-foreground/80"><Wrench className="h-3 w-3 text-muted-foreground/80" /></span>
-                <span className="font-semibold text-muted-foreground">{groupSteps.length} processing steps</span>
+                <span className="font-semibold text-muted-foreground">{groupSteps.length} 个执行步骤</span>
                 <span className="text-[10px] text-muted-foreground/50 truncate flex-1 text-left font-mono">{summary}</span>
                 {hasBookmarks && <span className="text-[10px]"><Star className="h-2.5 w-2.5 fill-yellow-500 text-yellow-500" /></span>}
                 <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground/60">#{first}{first !== last ? `–${last}` : ''}</Badge>
@@ -290,7 +290,7 @@ export function ChatArea({ steps, searchQuery, activeFilters, onStepClick, bookm
                         <MessageSquare className="h-8 w-8 text-muted-foreground/30 animate-pulse" />
                         <p className="text-lg font-medium">Antigravity Deck</p>
                     </div>
-                    <p className="text-sm opacity-60">Select a conversation to start viewing</p>
+                    <p className="text-sm opacity-60">请选择一个对话开始查看</p>
                 </div>
             </div>
         );
@@ -314,13 +314,13 @@ export function ChatArea({ steps, searchQuery, activeFilters, onStepClick, bookm
                     {hasOlderSteps && (
                         <div className="flex justify-center py-2 text-xs text-muted-foreground">
                             {loadingOlder ? (
-                                <span className="animate-pulse">Loading older steps...</span>
+                                <span className="animate-pulse">正在加载更早的步骤...</span>
                             ) : (
                                 <button
                                     onClick={onLoadOlder}
                                     className="hover:text-foreground transition-colors cursor-pointer"
                                 >
-                                    ↑ Load older steps ({baseIndex} more above)
+                                    ↑ 加载更早的步骤 (上方还有 {baseIndex} 步)
                                 </button>
                             )}
                         </div>

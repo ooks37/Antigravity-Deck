@@ -72,10 +72,10 @@ export function AuthGate({ children }: AuthGateProps) {
                 setAuthKey(key.trim());
                 setAuthenticated(true);
             } else {
-                setError('Invalid key');
+                setError('访问密钥无效');
             }
         } catch {
-            setError('Cannot reach server');
+            setError('无法连接到服务器');
         } finally {
             setChecking(false);
         }
@@ -88,8 +88,8 @@ export function AuthGate({ children }: AuthGateProps) {
             <Card className="w-full max-w-sm">
                 <CardHeader className="text-center pb-2">
                     <div className="mb-3"><Lock className="h-8 w-8 text-muted-foreground mx-auto" /></div>
-                    <CardTitle className="text-xl">AntigravityChat</CardTitle>
-                    <CardDescription>Enter your access key to continue</CardDescription>
+                    <CardTitle className="text-xl">Antigravity Deck</CardTitle>
+                    <CardDescription>请输入访问密钥以继续</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={handleSubmit} className="space-y-4">
@@ -97,7 +97,7 @@ export function AuthGate({ children }: AuthGateProps) {
                             type="password"
                             value={key}
                             onChange={(e) => setKey(e.target.value)}
-                            placeholder="Access key"
+                            placeholder="访问密钥 (Access Key)"
                             autoFocus
                         />
                         {error && (
@@ -108,7 +108,7 @@ export function AuthGate({ children }: AuthGateProps) {
                             className="w-full"
                             disabled={checking || !key.trim()}
                         >
-                            {checking ? 'Checking...' : 'Enter'}
+                            {checking ? '验证中...' : '进入控制台'}
                         </Button>
                     </form>
                 </CardContent>

@@ -86,11 +86,11 @@ function LaunchIdeButton() {
       }`}
     >
       {state === 'launched' ? (
-        <><Check className="w-4 h-4" /> Launched — waiting for detection...</>
+        <><Check className="w-4 h-4" /> 已启动 — 正在等待连接...</>
       ) : state === 'launching' ? (
-        <><Loader2 className="w-4 h-4 animate-spin" /> Launching...</>
+        <><Loader2 className="w-4 h-4 animate-spin" /> 正在启动...</>
       ) : (
-        <><Rocket className="w-4 h-4" /> Launch Antigravity</>
+        <><Rocket className="w-4 h-4" /> 启动 Antigravity</>
       )}
     </button>
   );
@@ -423,7 +423,7 @@ export default function Home() {
       // Search focus
       if (mod && (e.key === 'f' || e.key === 'k')) {
         e.preventDefault();
-        document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus();
+        document.querySelector<HTMLInputElement>('input[data-search-steps]')?.focus();
       }
       // New conversation
       if (mod && e.key === 'n') {
@@ -526,7 +526,7 @@ export default function Home() {
                     {currentConvInfo?.summary || currentConvId.substring(0, 8)}
                   </span>
                   <span className="text-[10px] text-muted-foreground/60 hidden sm:inline">
-                    ({steps.length || currentConvInfo?.stepCount || 0} steps)
+                    ({steps.length || currentConvInfo?.stepCount || 0} 步)
                   </span>
                 </>
               )}
@@ -537,7 +537,7 @@ export default function Home() {
               {bookmarkedSteps.size > 0 && (
                 <Badge variant="secondary" className="text-[10px] hidden sm:inline-flex gap-1"><Star className="w-3 h-3" /> {bookmarkedSteps.size}</Badge>
               )}
-              {showChat && <span className="text-xs text-muted-foreground font-mono hidden md:inline">{steps.length > 0 ? `${steps.length} steps` : ''}</span>}
+              {showChat && <span className="text-xs text-muted-foreground font-mono hidden md:inline">{steps.length > 0 ? `${steps.length} 步` : ''}</span>}
               {lastUpdate && <span className="text-xs text-muted-foreground hidden md:inline">{lastUpdate}</span>}
               {/* Status indicators — WS connection + LS detection */}
               <div className="flex items-center gap-1.5">
@@ -549,7 +549,7 @@ export default function Home() {
                 {/* Language Server detection status */}
                 <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${detected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : connected ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-muted text-muted-foreground border border-border/30'}`}>
                   <div className={`w-1.5 h-1.5 rounded-full ${detected ? 'bg-emerald-400' : connected ? 'bg-amber-400 animate-pulse' : 'bg-muted-foreground/50'}`} />
-                  <span>{detected ? 'LS Connected' : connected ? 'Detecting...' : 'LS N/A'}</span>
+                  <span>{detected ? 'LS 已连接' : connected ? '探测中...' : 'LS 离线'}</span>
                 </div>
               </div>
             </div>
@@ -560,18 +560,18 @@ export default function Home() {
           {showShortcuts && (
             <div className="absolute right-2 sm:right-4 top-12 z-50 w-[calc(100%-1rem)] sm:w-56 bg-popover border border-border rounded-lg shadow-xl p-3 space-y-1.5 text-xs">
               <div className="flex items-center justify-between pb-1.5 border-b border-border mb-1.5">
-                <span className="font-semibold text-foreground">Keyboard Shortcuts</span>
+                <span className="font-semibold text-foreground">快捷键说明</span>
                 <button onClick={() => setShowShortcuts(false)} className="text-muted-foreground hover:text-foreground">✕</button>
               </div>
               {[
-                ['Ctrl+K', 'Search steps'],
-                ['Ctrl+N', 'New conversation'],
-                ['Ctrl+Shift+E', 'Export to markdown'],
-                ['←  →', 'Navigate steps'],
-                ['B', 'Toggle bookmark'],
-                ['Esc', 'Close panels'],
-                ['Enter', 'Send message'],
-                ['Shift+Enter', 'New line'],
+                ['Ctrl+K', '搜索步骤'],
+                ['Ctrl+N', '新建对话'],
+                ['Ctrl+Shift+E', '导出 Markdown'],
+                ['←  →', '切换上下步'],
+                ['B', '收藏/取消步骤'],
+                ['Esc', '关闭详情面板'],
+                ['Enter', '发送消息'],
+                ['Shift+Enter', '换行'],
               ].map(([key, desc]) => (
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-muted-foreground">{desc}</span>
@@ -599,36 +599,36 @@ export default function Home() {
           )}
 
           {/* === Main panel content === */}
-          {!detected && (
+          {!detected && !showSettings && (
             <div className="flex-1 flex items-center justify-center">
               {swapping ? (
                 <div className="text-center space-y-4 max-w-sm">
                   <div className="flex items-center justify-center gap-3">
                     <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
-                    <h2 className="text-xl font-semibold text-foreground/80">Switching Account...</h2>
+                    <h2 className="text-xl font-semibold text-foreground/80">正在切换账号...</h2>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Closing IDE, swapping profile, and relaunching. This takes ~10 seconds.
+                    正在关闭 IDE、切换账号配置并重新启动，预计需要约 10 秒。
                   </p>
                   <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground/70">
                     <span className="relative flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400/75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
                     </span>
-                    <span>Waiting for Antigravity to restart...</span>
+                    <span>等待 Antigravity 重新启动...</span>
                   </div>
                 </div>
               ) : (
               <div className="text-center space-y-5 max-w-sm">
                 <div className="flex items-center justify-center gap-3">
                   <WifiOff className="w-8 h-8 text-muted-foreground/50" />
-                  <h2 className="text-xl font-semibold text-foreground/80">Antigravity Not Detected</h2>
+                  <h2 className="text-xl font-semibold text-foreground/80">未检测到 Antigravity 服务</h2>
                 </div>
                 <ol className="text-left space-y-2.5 rounded-lg bg-muted/10 border border-border/30 px-5 py-4">
                   {[
-                    'Open Antigravity IDE',
-                    'Open a project folder in Antigravity',
-                    'Antigravity Deck will auto-detect it within ~10 seconds',
+                    '打开 Antigravity IDE',
+                    '在 Antigravity 中打开一个项目文件夹',
+                    'Antigravity Deck 将在约 10 秒内自动发现并连接',
                   ].map((text, i) => (
                     <li key={i} className="flex items-start gap-3 text-sm text-muted-foreground">
                       <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted/30 flex items-center justify-center text-xs font-medium text-muted-foreground/80">
@@ -638,13 +638,21 @@ export default function Home() {
                     </li>
                   ))}
                 </ol>
-                <LaunchIdeButton />
+                <div className="flex flex-col items-center gap-2">
+                  <LaunchIdeButton />
+                  <button
+                    onClick={handleShowSettings}
+                    className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors cursor-pointer"
+                  >
+                    打开应用设置 / 手动更新 agy CLI
+                  </button>
+                </div>
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground/70">
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400/75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
                   </span>
-                  <span>Detecting Antigravity Language Server...</span>
+                  <span>正在扫描 Antigravity Language Server...</span>
                 </div>
               </div>
               )}
@@ -653,7 +661,22 @@ export default function Home() {
 
           {detected && showAccountInfo && <AccountInfoView />}
 
-          {detected && showSettings && <SettingsView />}
+          {showSettings && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {!detected && (
+                <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-300">
+                  <span>当前尚未检测到运行中的 Antigravity IDE，你仍可在此配置路径或手动更新 agy CLI。</span>
+                  <button
+                    onClick={handleGoHome}
+                    className="underline hover:text-amber-200 flex-shrink-0 ml-3 cursor-pointer"
+                  >
+                    返回检测界面
+                  </button>
+                </div>
+              )}
+              <SettingsView />
+            </div>
+          )}
 
           {/* Always mounted — WS stays alive, events accumulate in background */}
           <div className={detected && showLogs ? 'flex flex-col flex-1 min-h-0 overflow-hidden' : 'hidden'}>
@@ -672,9 +695,9 @@ export default function Home() {
                 <div className="flex-1 flex items-center justify-center">
                   <div className="text-center space-y-3">
                     <div className="text-4xl">📂</div>
-                    <h3 className="text-lg font-semibold text-foreground/70">No workspace selected</h3>
+                    <h3 className="text-lg font-semibold text-foreground/70">尚未选择工作区</h3>
                     <p className="text-sm text-muted-foreground max-w-sm">
-                      Select a workspace from the sidebar first, then open Source Control.
+                      请先从左侧栏选择一个工作区项目，再打开源代码管理。
                     </p>
                   </div>
                 </div>
@@ -771,8 +794,8 @@ export default function Home() {
               <Smartphone className="w-4 h-4 text-blue-400 flex-shrink-0" />
               <span className="text-xs text-blue-300 flex-1">
                 {pwaInstall.isIOS
-                  ? <>Tap <Share2 className="w-3 h-3 inline" /> then &quot;Add to Home Screen&quot;</>
-                  : 'Install app for the best experience'
+                  ? <>点击底部分享图标 <Share2 className="w-3 h-3 inline" /> 后选择“添加到主屏幕”</>
+                  : '将应用安装到桌面/主屏幕以获得最佳体验'
                 }
               </span>
               {pwaInstall.canInstall && (
@@ -780,7 +803,7 @@ export default function Home() {
                   onClick={pwaInstall.install}
                   className="text-[10px] font-medium px-2.5 py-1 rounded-md bg-blue-500 text-white hover:bg-blue-400 transition-colors flex-shrink-0"
                 >
-                  Install
+                  立即安装
                 </button>
               )}
               <button onClick={pwaInstall.dismiss} className="text-blue-400/60 hover:text-blue-300 transition-colors flex-shrink-0">
@@ -792,15 +815,15 @@ export default function Home() {
           {/* Footer */}
           <footer className="flex items-center justify-between px-2 sm:px-4 h-8 bg-background border-t border-border flex-shrink-0 text-[10px] text-muted-foreground/60">
             <div className="flex items-center gap-2 sm:gap-3">
-              <span><FolderSync className="w-3 h-3 inline-block mr-1" />Antigravity Deck v3</span>
+              <span><FolderSync className="w-3 h-3 inline-block mr-1" />Antigravity Deck 中文版</span>
               <span className="w-px h-3 bg-border hidden sm:block" />
-              <span className="hidden sm:inline">AntigravityChat</span>
+              <span className="hidden sm:inline">远程控制台</span>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
               <button onClick={() => setShowShortcuts(v => !v)}
                 className="flex items-center gap-1 hover:text-foreground transition-colors">
                 <kbd className="px-1 py-0.5 bg-muted/50 rounded text-[9px] font-mono">?</kbd>
-                <span>Shortcuts</span>
+                <span>快捷键</span>
               </button>
             </div>
           </footer>

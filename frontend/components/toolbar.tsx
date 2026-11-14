@@ -19,9 +19,10 @@ export function Toolbar({
                 <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/50" />
                     <Input
+                        data-search-steps="true"
                         value={searchQuery}
                         onChange={(e) => onSearchChange(e.target.value)}
-                        placeholder="Search steps..."
+                        placeholder="搜索步骤..."
                         className="h-7 pl-7 pr-16 text-xs bg-muted/50"
                     />
                     {searchQuery && (

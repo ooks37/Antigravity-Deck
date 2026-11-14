@@ -24,7 +24,7 @@ export function SystemResourceSummary({ system, onClick }: SystemResourceSummary
         <button
             onClick={onClick}
             className="w-full px-3 py-2 flex flex-col gap-1.5 rounded-lg bg-sidebar-accent/30 hover:bg-sidebar-accent/60 transition-colors cursor-pointer border border-sidebar-border/30 group"
-            title="Click to open Resource Monitor"
+            title="点击打开系统资源监控"
         >
             {/* CPU row */}
             <div className="flex items-center gap-2">

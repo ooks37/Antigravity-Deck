@@ -47,14 +47,14 @@ export function TokenUsage({ cascadeId }: { cascadeId: string | null }) {
         <div className="px-4 py-2 bg-muted/10 border-t border-border/30 text-[10px] text-muted-foreground">
             <div className="flex items-center gap-3 flex-wrap">
                 <span className="flex items-center gap-1"><BarChart2 className="h-3 w-3" /> <strong className="text-foreground/70">{total.toLocaleString()}</strong> tokens</span>
-                <span className="text-green-400/70">↓ {data.totalInput.toLocaleString()} in</span>
-                <span className="text-blue-400/70">↑ {data.totalOutput.toLocaleString()} out</span>
+                <span className="text-green-400/70">↓ {data.totalInput.toLocaleString()} 输入</span>
+                <span className="text-blue-400/70">↑ {data.totalOutput.toLocaleString()} 输出</span>
                 {data.totalCache > 0 && (
-                    <span className="text-yellow-400/70 flex items-center gap-1"><Zap className="h-3 w-3" /> {data.totalCache.toLocaleString()} cached</span>
+                    <span className="text-yellow-400/70 flex items-center gap-1"><Zap className="h-3 w-3" /> {data.totalCache.toLocaleString()} 缓存命中</span>
                 )}
                 {Object.entries(data.byModel).map(([model, d]) => (
                     <span key={model} className="text-muted-foreground/50">
-                        {model.split('/').pop()}: {d.count} calls
+                        {model.split('/').pop()}: {d.count} 次调用
                     </span>
                 ))}
             </div>

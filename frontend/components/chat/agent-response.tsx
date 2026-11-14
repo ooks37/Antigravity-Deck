@@ -34,7 +34,7 @@ function ArtifactPreview({ uri }: { uri: string }) {
             })
             .then(d => {
                 if (d.content) { setContent(d.content); }
-                else { setError('Empty file'); }
+                else { setError('文件为空'); }
                 setLoading(false);
             })
             .catch(e => { setError(e.message); setLoading(false); });
@@ -50,7 +50,7 @@ function ArtifactPreview({ uri }: { uri: string }) {
                 >
                     <FileText className="h-4 w-4 shrink-0" />
                     <span className="flex-1 min-w-0 text-left truncate">{fileName}</span>
-                    <span className="text-[10px] text-muted-foreground/50">Click to view →</span>
+                    <span className="text-[10px] text-muted-foreground/50">点击查看 →</span>
                 </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-full sm:w-[600px] sm:max-w-[600px] p-0 flex flex-col overflow-hidden">
@@ -66,12 +66,12 @@ function ArtifactPreview({ uri }: { uri: string }) {
                 <ScrollArea className="flex-1 min-h-0">
                     <div className="p-5 text-sm leading-relaxed overflow-x-auto max-w-full">
                         {loading && (
-                            <div className="text-muted-foreground animate-pulse">Loading file content...</div>
+                            <div className="text-muted-foreground animate-pulse">正在加载文件内容...</div>
                         )}
                         {error && (
                             <div className="text-amber-400/80 text-xs">
-                                <AlertTriangle className="h-3 w-3 inline mr-1" /> Could not load file: {error}
-                                <br /><span className="text-muted-foreground/50 text-[10px] mt-1 block">Path: {uri}</span>
+                                <AlertTriangle className="h-3 w-3 inline mr-1" /> 无法加载文件：{error}
+                                <br /><span className="text-muted-foreground/50 text-[10px] mt-1 block">路径：{uri}</span>
                             </div>
                         )}
                         {content && <MarkdownRenderer content={content} />}
@@ -106,7 +106,7 @@ export const AgentResponse = memo(function AgentResponse({ step, index }: { step
             <div className="max-w-[85%] group relative rounded-lg rounded-bl-md px-4 py-3 bg-gradient-to-r from-purple-950/20 to-transparent border border-purple-500/10 overflow-hidden min-w-0">
                 <div className="flex items-center gap-2 mb-1.5">
                     <div className="w-5 h-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px]"><Bot className="h-2.5 w-2.5 text-purple-400" /></div>
-                    <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">Agent</span>
+                    <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">智能体</span>
                     <span className="text-[10px] text-muted-foreground/40 opacity-0 group-hover:opacity-100">#{index + 1}</span>
                 </div>
                 <div className="text-sm leading-relaxed"><MarkdownRenderer content={content} /></div>

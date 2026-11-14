@@ -514,8 +514,8 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     const isWaiting = cascadeStatus === 'CASCADE_RUN_STATUS_WAITING_FOR_USER';
     const isActive = isRunning || isWaiting;
 
-    const selectedWsName = selectedWs !== null && workspaces[selectedWs] ? workspaces[selectedWs].workspaceName : 'No workspace';
-    const selectedModelLabel = models.find(m => m.modelId === selectedModel)?.label || 'Default';
+    const selectedWsName = selectedWs !== null && workspaces[selectedWs] ? workspaces[selectedWs].workspaceName : '未选择工作区';
+    const selectedModelLabel = models.find(m => m.modelId === selectedModel)?.label || '默认模型';
     // Render grouped exactly like the IDE picker; fall back to a single flat section.
     const modelDisplayGroups: CascadeModelGroup[] = modelGroups.length ? modelGroups : (models.length ? [{ name: '', models }] : []);
 
@@ -535,7 +535,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                         <div className="mx-3 sm:mx-6 mt-2 mb-0 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5 flex items-center gap-3">
                             <Bell className="h-4 w-4 text-sky-400 flex-shrink-0" />
                             <p className="text-xs text-muted-foreground flex-1">
-                                Get notified when cascades finish — enable push notifications.
+                                开启推送通知，在任务执行完成或等待确认时及时收到提醒。
                             </p>
                             <button
                                 className="text-xs font-medium text-sky-400 hover:text-sky-300 transition-colors whitespace-nowrap"
@@ -548,14 +548,14 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     }
                                 }}
                             >
-                                Enable
+                                立即开启
                             </button>
                             {onShowSettings && (
                                 <button
                                     className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors whitespace-nowrap"
                                     onClick={onShowSettings}
                                 >
-                                    Settings
+                                    设置
                                 </button>
                             )}
                             <button
@@ -576,10 +576,10 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 <div className="text-center space-y-4">
                                     <div className="flex items-center justify-center gap-3">
                                         <Rocket className="h-8 w-8 text-muted-foreground/40" />
-                                        <h2 className="text-xl font-semibold text-foreground/80">AntigravityChat</h2>
+                                        <h2 className="text-xl font-semibold text-foreground/80">Antigravity Deck</h2>
                                     </div>
                                     <p className="text-sm text-muted-foreground max-w-md">
-                                        {currentConvId ? 'Loading conversation...' : 'Select a conversation from the sidebar or start a new one'}
+                                        {currentConvId ? '正在加载对话内容...' : '从左侧栏选择历史对话，或在下方输入框开启新对话'}
                                     </p>
                                 </div>
                             </div>
@@ -589,13 +589,13 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 {baseIndex > 0 && (
                                     <div className="flex justify-center py-3 mb-2">
                                         {loadingOlder ? (
-                                            <span className="text-xs text-muted-foreground animate-pulse">Loading older steps...</span>
+                                            <span className="text-xs text-muted-foreground animate-pulse">正在加载更早的步骤...</span>
                                         ) : (
                                             <button
                                                 onClick={onLoadOlder}
                                                 className="text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-md hover:bg-muted/40"
                                             >
-                                                ↑ Load older steps ({baseIndex} more above)
+                                                ↑ 加载更早的步骤 (上方还有 {baseIndex} 步)
                                             </button>
                                         )}
                                     </div>
@@ -629,7 +629,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 size="sm"
                                 className="scroll-bottom-btn"
                             >
-                                <ArrowDownIcon className="h-3 w-3 mr-1 inline" /> New messages
+                                <ArrowDownIcon className="h-3 w-3 mr-1 inline" /> 查看最新消息
                             </Button>
                         )}
                     </div>
@@ -646,7 +646,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 <div className="text-center space-y-2">
                                     <div className="flex items-center justify-center gap-2">
                                         <Camera className="h-6 w-6 text-primary/60" />
-                                        <p className="text-sm font-medium text-primary/80">Drop images here</p>
+                                        <p className="text-sm font-medium text-primary/80">松手以上传图片</p>
                                     </div>
                                 </div>
                             </div>
@@ -700,7 +700,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 {isActive && (
                                     <div className="flex items-center gap-1.5 text-[10px] text-purple-400/70 ml-1">
                                         <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                                        {isWaiting ? (autoAccept ? 'Auto-accepting...' : 'Waiting for approval') : 'Running'}
+                                        {isWaiting ? (autoAccept ? '正在自动放行...' : '等待确认审批') : '运行中'}
                                     </div>
                                 )}
 
@@ -714,7 +714,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     className="gap-1 h-7 text-muted-foreground hover:text-foreground"
                                 >
                                     <Plus className="h-3.5 w-3.5" />
-                                    <span className="hidden sm:inline">New Chat</span>
+                                    <span className="hidden sm:inline">新对话</span>
                                 </Button>
 
                                 {/* Chat Settings Dropdown */}
@@ -722,7 +722,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     <DropdownMenuTrigger asChild>
                                         <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-muted-foreground hover:text-foreground">
                                             <Settings className="w-3.5 h-3.5" />
-                                            <span className="hidden sm:inline">Settings</span>
+                                            <span className="hidden sm:inline">对话设置</span>
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-56 mb-1 bg-popover/95 backdrop-blur-sm shadow-xl rounded-lg border-border">
@@ -742,7 +742,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                         >
                                             <div className="flex items-center gap-2">
                                                 <Zap className={cn("w-3.5 h-3.5", autoAccept ? "text-green-400" : "text-muted-foreground")} />
-                                                <span className={autoAccept ? "text-green-400/90" : ""}>Auto-accept</span>
+                                                <span className={autoAccept ? "text-green-400/90" : ""}>自动放行操作</span>
                                             </div>
                                             <Switch checked={autoAccept} className="scale-75 pointer-events-none" />
                                         </DropdownMenuItem>
@@ -755,30 +755,30 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                         >
                                             <div className="flex items-center gap-2">
                                                 <Activity className={cn("w-3.5 h-3.5", showTimeline ? "text-blue-400" : "text-muted-foreground")} />
-                                                <span className={showTimeline ? "text-blue-400/90" : ""}>Timeline</span>
+                                                <span className={showTimeline ? "text-blue-400/90" : ""}>步骤时间轴</span>
                                             </div>
                                             <Switch checked={showTimeline} className="scale-75 pointer-events-none" />
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => setShowTokens(!showTokens)} className="cursor-pointer">
                                             <BarChart2 className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                                            {showTokens ? 'Hide Tokens' : 'Show Tokens'}
+                                            {showTokens ? '隐藏 Token 统计' : '显示 Token 统计'}
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator className="bg-white/5" />
                                         <DropdownMenuItem onClick={onToggleAnalytics} className="cursor-pointer">
                                             <BarChart2 className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                                            {showAnalytics ? 'Hide Stats' : 'Show Stats'}
+                                            {showAnalytics ? '隐藏统计面板' : '显示统计面板'}
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={onExport} disabled={steps.length === 0} className="cursor-pointer">
                                             <Download className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                                            Export Markdown
+                                            导出 Markdown
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
                                             onClick={() => notificationService?.setEnabled(!notificationsEnabled)}
                                             className="cursor-pointer"
                                         >
                                             {notificationsEnabled
-                                                ? <><BellOff className="w-3.5 h-3.5 mr-2 text-muted-foreground" /> Disable Notifications</>
-                                                : <><Bell className="w-3.5 h-3.5 mr-2 text-muted-foreground" /> Enable Notifications</>}
+                                                ? <><BellOff className="w-3.5 h-3.5 mr-2 text-muted-foreground" /> 关闭通知提醒</>
+                                                : <><Bell className="w-3.5 h-3.5 mr-2 text-muted-foreground" /> 开启通知提醒</>}
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator className="bg-white/5" />
                                         <DropdownMenuItem
@@ -792,7 +792,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                             className="cursor-pointer text-muted-foreground focus:text-foreground"
                                         >
                                             <RefreshCcw className="w-3.5 h-3.5 mr-2" />
-                                            Refresh Chat
+                                            刷新对话缓存
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
@@ -824,11 +824,11 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                             className="shrink-0 h-6 text-[10px] text-muted-foreground hover:text-destructive px-2"
                                             onClick={clearAllImages}
                                         >
-                                            Clear all
+                                            清空全部
                                         </Button>
                                     )}
                                     <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                                        {pendingImages.length} image{pendingImages.length > 1 ? 's' : ''}
+                                        {pendingImages.length} 张图片
                                     </span>
                                 </div>
                             )}
@@ -852,7 +852,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     size="icon"
                                     className="shrink-0 h-9 w-9 sm:h-11 sm:w-11 rounded-lg border border-border/50"
                                     onClick={() => fileInputRef.current?.click()}
-                                    title="Attach image"
+                                    title="添加图片"
                                 >
                                     <Paperclip className="h-4 w-4" />
                                 </Button>
@@ -864,7 +864,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                         showSourceControl && 'border-primary/30'
                                     )}
                                     onClick={() => setShowSourceControl(v => !v)}
-                                    title="Source Control"
+                                    title="源代码管理"
                                 >
                                     <GitBranch className="h-4 w-4" />
                                 </Button>
@@ -874,7 +874,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     onChange={e => handleInputChange(e.target.value)}
                                     onKeyDown={handleKeyDown}
                                     onPaste={handlePaste}
-                                    placeholder={currentConvId ? "Continue conversation..." : "Start a new conversation..."}
+                                    placeholder={currentConvId ? "输入消息继续对话..." : "输入消息开始新对话..."}
                                     className="flex-1 resize-none min-h-[36px] sm:min-h-[44px] max-h-[200px] text-sm !py-[8px] sm:!py-[12px]"
                                     rows={1}
                                     onInput={(e) => {

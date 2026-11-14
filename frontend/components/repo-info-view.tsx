@@ -66,7 +66,7 @@ function isAbortError(e: unknown): boolean {
 function currentBranch(repo: RepoInfo): string {
     return repo.branches?.find(b => b.isCurrentBranch)?.name
         ?? repo.branches?.[0]?.name
-        ?? '(unknown branch)';
+        ?? '（未知分支）';
 }
 
 // === Shared presentational primitives ===
@@ -87,13 +87,13 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
         <div className="flex items-center justify-center py-16">
             <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                 <AlertTriangle className="w-6 h-6 text-red-400/60" />
-                <span className="text-sm font-medium text-foreground/70">Failed to load</span>
+                <span className="text-sm font-medium text-foreground/70">加载失败</span>
                 <span className="text-xs text-muted-foreground font-mono break-all">{message}</span>
                 <button
                     onClick={onRetry}
                     className="text-xs px-3 py-1.5 rounded-lg bg-muted/40 hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors border border-border/30"
                 >
-                    Retry
+                    重试
                 </button>
             </div>
         </div>
@@ -105,9 +105,9 @@ function NoWorkspaceState() {
         <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                 <FolderOpen className="w-8 h-8 text-muted-foreground/30" />
-                <span className="text-sm font-medium text-foreground/70">No workspace open</span>
+                <span className="text-sm font-medium text-foreground/70">尚未打开工作区</span>
                 <span className="text-xs text-muted-foreground">
-                    Open a workspace folder in Antigravity IDE to view repo info and pending AI edits.
+                    请在 Antigravity IDE 中打开工作区文件夹，以查看仓库信息和待处理的 AI 编辑。
                 </span>
             </div>
         </div>
@@ -124,7 +124,7 @@ function RepoCard({ repo }: { repo: RepoInfo }) {
         <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
             <div className="px-4 py-3 bg-muted/10 border-b border-border/30 flex items-center gap-2">
                 <GitBranch className="w-4 h-4 text-emerald-400/60 shrink-0" />
-                <span className="text-sm font-semibold truncate">{repo.name ?? '(unnamed repo)'}</span>
+                <span className="text-sm font-semibold truncate">{repo.name ?? '（未命名仓库）'}</span>
                 {repo.scmType && repo.scmType !== 'GIT' && (
                     <Badge className="text-[9px] h-5 px-1.5 bg-muted/30 text-muted-foreground border border-border/20 hover:bg-muted/30 ml-auto shrink-0">
                         {repo.scmType}
@@ -134,7 +134,7 @@ function RepoCard({ repo }: { repo: RepoInfo }) {
             <div className="px-4 py-3 space-y-2">
                 {/* Current branch */}
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0">Branch</span>
+                    <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0">当前分支</span>
                     <div className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                         <span className="text-sm font-mono font-medium text-emerald-400">{branch}</span>
@@ -143,14 +143,14 @@ function RepoCard({ repo }: { repo: RepoInfo }) {
                 {/* Repo path */}
                 {repo.repoPath && (
                     <div className="flex items-start gap-2">
-                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0 pt-0.5">Path</span>
+                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0 pt-0.5">路径</span>
                         <span className="text-[11px] font-mono text-muted-foreground/70 break-all">{repo.repoPath}</span>
                     </div>
                 )}
                 {/* Other branches */}
                 {otherBranches.length > 0 && (
                     <div className="flex items-start gap-2">
-                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0 pt-0.5">Branches</span>
+                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0 pt-0.5">其他分支</span>
                         <div className="flex flex-wrap gap-1">
                             {otherBranches.slice(0, 8).map((b, i) => (
                                 <span
@@ -162,7 +162,7 @@ function RepoCard({ repo }: { repo: RepoInfo }) {
                             ))}
                             {otherBranches.length > 8 && (
                                 <span className="text-[10px] text-muted-foreground/50 py-0.5">
-                                    +{otherBranches.length - 8} more
+                                    还有 {otherBranches.length - 8} 个
                                 </span>
                             )}
                         </div>
@@ -186,35 +186,35 @@ function EditStateCard({ edit }: { edit: WorkspaceEdit }) {
                 <span className="text-sm font-semibold truncate">
                     {edit.repoRoot
                         ? edit.repoRoot.split(/[\\/]/).filter(Boolean).pop() ?? edit.repoRoot
-                        : '(unknown repo)'}
+                        : '（未知仓库）'}
                 </span>
                 {!hasChanges && (
                     <Badge className="text-[9px] h-5 px-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/10 ml-auto shrink-0">
-                        clean
+                        无变更
                     </Badge>
                 )}
                 {hasChanges && (
                     <Badge className="text-[9px] h-5 px-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/10 ml-auto shrink-0">
-                        pending
+                        待处理
                     </Badge>
                 )}
             </div>
             <div className="px-4 py-3 space-y-2">
                 {edit.repoRoot && (
                     <div className="flex items-start gap-2">
-                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0 pt-0.5">Root</span>
+                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider w-20 shrink-0 pt-0.5">根目录</span>
                         <span className="text-[11px] font-mono text-muted-foreground/70 break-all">{edit.repoRoot}</span>
                     </div>
                 )}
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Additions</span>
+                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">新增</span>
                         <span className={`text-sm font-mono font-medium ${additions > 0 ? 'text-emerald-400' : 'text-muted-foreground/40'}`}>
                             +{additions}
                         </span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Deletions</span>
+                        <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">删除</span>
                         <span className={`text-sm font-mono font-medium ${deletions > 0 ? 'text-red-400' : 'text-muted-foreground/40'}`}>
                             -{deletions}
                         </span>
@@ -222,12 +222,12 @@ function EditStateCard({ edit }: { edit: WorkspaceEdit }) {
                     {editCount > 0 && (
                         <div className="flex items-center gap-1.5">
                             <GitCommit className="w-3 h-3 text-muted-foreground/40" />
-                            <span className="text-xs font-mono text-muted-foreground">{editCount} edit{editCount !== 1 ? 's' : ''}</span>
+                            <span className="text-xs font-mono text-muted-foreground">{editCount} 处编辑</span>
                         </div>
                     )}
                 </div>
                 {!hasChanges && (
-                    <p className="text-xs text-muted-foreground/50">No pending AI edits in this repo.</p>
+                    <p className="text-xs text-muted-foreground/50">此仓库暂无待处理的 AI 编辑。</p>
                 )}
             </div>
         </div>
@@ -270,7 +270,7 @@ export function RepoInfoView() {
             })
             .catch((e: unknown) => {
                 if (isAbortError(e)) return;
-                setWsError(e instanceof Error ? e.message : 'Failed to load workspace info');
+                setWsError(e instanceof Error ? e.message : '加载工作区信息失败');
                 setWorkspaceUris([]);
                 setWsLoading(false);
             });
@@ -304,7 +304,7 @@ export function RepoInfoView() {
             })
             .catch((e: unknown) => {
                 if (isAbortError(e)) return;
-                setDataError(e instanceof Error ? e.message : 'Failed to load repo info');
+                setDataError(e instanceof Error ? e.message : '加载仓库信息失败');
                 setDataLoading(false);
             });
     }, []);
@@ -324,7 +324,7 @@ export function RepoInfoView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <Activity className="w-8 h-8 text-muted-foreground/50 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">Detecting workspace...</span>
+                    <span className="text-sm text-muted-foreground">正在检测工作区...</span>
                 </div>
             </div>
         );
@@ -335,7 +335,7 @@ export function RepoInfoView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                     <AlertTriangle className="w-8 h-8 text-red-400/60" />
-                    <span className="text-sm font-medium text-foreground/70">Failed to detect workspace</span>
+                    <span className="text-sm font-medium text-foreground/70">检测工作区失败</span>
                     <span className="text-xs text-muted-foreground font-mono break-all">{wsError}</span>
                 </div>
             </div>
@@ -357,9 +357,9 @@ export function RepoInfoView() {
                         <GitBranch className="w-5 h-5 text-emerald-400" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold">Repo Info</h2>
+                        <h2 className="text-lg font-semibold">仓库信息</h2>
                         <p className="text-xs text-muted-foreground">
-                            Repository state and pending AI edits from the active workspace
+                            当前活动工作区的 Git 仓库状态与待处理 AI 编辑
                         </p>
                     </div>
                     {dataLoading && (
@@ -369,7 +369,7 @@ export function RepoInfoView() {
 
                 {/* Data loading state */}
                 {dataLoading && panelData === null && (
-                    <LoadingSpinner label="Loading repo info..." />
+                    <LoadingSpinner label="正在加载仓库信息..." />
                 )}
 
                 {/* Error state */}
@@ -384,14 +384,14 @@ export function RepoInfoView() {
                         <div className="space-y-3">
                             <h3 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider flex items-center gap-2">
                                 <GitBranch className="w-3.5 h-3.5" />
-                                Repositories
+                                代码仓库
                             </h3>
                             {panelData.repos.length === 0 ? (
                                 <div className="rounded-xl border border-border/50 bg-card/50 p-8 text-center">
                                     <GitBranch className="w-7 h-7 mx-auto text-muted-foreground/20 mb-3" />
-                                    <p className="text-sm font-medium text-muted-foreground/60 mb-1">No repositories found</p>
+                                    <p className="text-sm font-medium text-muted-foreground/60 mb-1">未检测到 Git 仓库</p>
                                     <p className="text-xs text-muted-foreground/40 max-w-xs mx-auto">
-                                        Open a git repository in Antigravity IDE to see branch and remote info here.
+                                        在 Antigravity IDE 中打开 Git 仓库后，此处将显示分支与远端信息。
                                     </p>
                                 </div>
                             ) : (
@@ -407,14 +407,14 @@ export function RepoInfoView() {
                         <div className="space-y-3">
                             <h3 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider flex items-center gap-2">
                                 <FileEdit className="w-3.5 h-3.5" />
-                                Pending AI Edits
+                                待处理 AI 编辑
                             </h3>
                             {panelData.editStates.length === 0 ? (
                                 <div className="rounded-xl border border-border/50 bg-card/50 p-8 text-center">
                                     <FileEdit className="w-7 h-7 mx-auto text-muted-foreground/20 mb-3" />
-                                    <p className="text-sm font-medium text-muted-foreground/60 mb-1">No pending AI edits</p>
+                                    <p className="text-sm font-medium text-muted-foreground/60 mb-1">暂无待处理 AI 编辑</p>
                                     <p className="text-xs text-muted-foreground/40 max-w-xs mx-auto">
-                                        AI-suggested changes that haven&apos;t been committed will appear here.
+                                        尚未提交的 AI 建议变更将在此处展示。
                                     </p>
                                 </div>
                             ) : (
@@ -430,7 +430,7 @@ export function RepoInfoView() {
 
                 {/* Footer */}
                 <p className="text-center text-[10px] text-muted-foreground/40 pb-4">
-                    Read-only view — manage repository and branches via Antigravity IDE
+                    只读视图 — 仓库与分支切换请在 Antigravity IDE 中操作
                 </p>
             </div>
         </div>

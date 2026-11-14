@@ -93,8 +93,8 @@ export function ProjectGroup({
                                 <span
                                     role="button"
                                     tabIndex={0}
-                                    aria-label="New conversation in this project"
-                                    title="New conversation in this project"
+                                    aria-label="在此项目中新建对话"
+                                    title="在此项目中新建对话"
                                     onClick={(e) => { e.stopPropagation(); onNewConversation(); }}
                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onNewConversation(); } }}
                                     className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
@@ -115,7 +115,7 @@ export function ProjectGroup({
                                 {conversations.length === 0 ? (
                                     <SidebarMenuSubItem>
                                         <span className="px-2 py-1 text-[10px] text-sidebar-foreground/40 italic">
-                                            No conversations
+                                            暂无对话
                                         </span>
                                     </SidebarMenuSubItem>
                                 ) : (
@@ -125,7 +125,7 @@ export function ProjectGroup({
                                                 <SidebarMenuSubButton
                                                     isActive={conv.id === currentConvId}
                                                     onClick={() => onSelectConv(conv.id)}
-                                                    title={`${conv.title}\n${conv.stepCount} steps · ${conv.id}`}
+                                                    title={`${conv.title}\n${conv.stepCount} 步 · ${conv.id}`}
                                                     className="text-xs peer pr-8"
                                                 >
                                                     <MessageSquare className="h-3 w-3 shrink-0" />
@@ -133,7 +133,7 @@ export function ProjectGroup({
                                                 </SidebarMenuSubButton>
                                                 <SidebarMenuAction
                                                     className="!top-1/2 !-translate-y-1/2 opacity-100 sm:opacity-0 sm:group-hover/conv:opacity-100 text-sidebar-foreground/30 hover:text-destructive hover:bg-destructive/10"
-                                                    title="Delete conversation"
+                                                    title="删除对话"
                                                     onClick={(e) => {
                                                         e.stopPropagation()
                                                         setDeleteTarget(conv)
@@ -149,7 +149,7 @@ export function ProjectGroup({
                                                     onClick={onSeeAll}
                                                     className="text-sidebar-foreground/50 text-[10px]"
                                                 >
-                                                    See all ({totalCount})
+                                                    查看全部 ({totalCount})
                                                 </SidebarMenuSubButton>
                                             </SidebarMenuSubItem>
                                         )}
@@ -164,18 +164,18 @@ export function ProjectGroup({
             <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Delete conversation</AlertDialogTitle>
+                        <AlertDialogTitle>删除对话</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Delete &ldquo;{deleteTarget?.title}&rdquo;? This action cannot be undone.
+                            确定要删除 &ldquo;{deleteTarget?.title}&rdquo; 吗？此操作无法撤销。
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel>取消</AlertDialogCancel>
                         <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             onClick={handleConfirmDelete}
                         >
-                            Delete
+                            删除
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

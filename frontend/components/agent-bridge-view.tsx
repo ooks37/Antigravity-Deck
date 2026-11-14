@@ -66,9 +66,9 @@ const LOG_ICONS: Record<string, typeof Bot> = {
 };
 
 const STATE_CONFIG = {
-    IDLE: { color: 'text-muted-foreground/50', dot: 'bg-muted-foreground/40', label: 'Offline', icon: WifiOff },
-    ACTIVE: { color: 'text-emerald-400', dot: 'bg-emerald-400', label: 'Connected', icon: Wifi },
-    TRANSITIONING: { color: 'text-amber-400', dot: 'bg-amber-400 animate-pulse', label: 'Transitioning', icon: RefreshCw },
+    IDLE: { color: 'text-muted-foreground/50', dot: 'bg-muted-foreground/40', label: '未连接', icon: WifiOff },
+    ACTIVE: { color: 'text-emerald-400', dot: 'bg-emerald-400', label: '已连接', icon: Wifi },
+    TRANSITIONING: { color: 'text-amber-400', dot: 'bg-amber-400 animate-pulse', label: '切换中', icon: RefreshCw },
 };
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ export function AgentBridgeView() {
                         <Bot className={cn('w-3.5 h-3.5', status.state === 'ACTIVE' ? 'text-emerald-400' : 'text-muted-foreground/50')} />
                     </div>
                     <div>
-                        <span className="text-xs font-semibold text-foreground/80">Agent Bridge</span>
+                        <span className="text-xs font-semibold text-foreground/80">助手桥接</span>
                         <div className="flex items-center gap-1.5">
                             <span className={cn('w-1.5 h-1.5 rounded-full', stateConf.dot)} />
                             <span className={cn('text-[10px] font-medium', stateConf.color)}>
@@ -239,7 +239,7 @@ export function AgentBridgeView() {
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => setShowSettings(p => !p)}
-                        title="Bridge Settings"
+                        title="桥接设置"
                     >
                         <Settings2 className={cn('h-3.5 w-3.5', showSettings ? 'text-primary' : 'text-muted-foreground/50')} />
                     </Button>
@@ -253,7 +253,7 @@ export function AgentBridgeView() {
                             className="h-7 text-[10px] gap-1 px-2.5"
                         >
                             <Play className="w-3 h-3" />
-                            Start
+                            启动
                         </Button>
                     ) : (
                         <Button
@@ -264,12 +264,12 @@ export function AgentBridgeView() {
                             className="h-7 text-[10px] gap-1 px-2.5"
                         >
                             <Square className="w-3 h-3" />
-                            Stop
+                            停止
                         </Button>
                     )}
 
                     {/* Refresh */}
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fetchStatus} title="Refresh">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fetchStatus} title="刷新">
                         <RefreshCw className="w-3 h-3 text-muted-foreground/40" />
                     </Button>
                 </div>
@@ -281,7 +281,7 @@ export function AgentBridgeView() {
                     <div className="px-4 py-3 space-y-3">
                         {/* Discord Bot Token */}
                         <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground/70">Discord Bot Token</Label>
+                            <Label className="text-[10px] text-muted-foreground/70">Discord 机器人令牌 (Bot Token)</Label>
                             <div className="relative">
                                 <Input
                                     type={showToken ? 'text' : 'password'}
@@ -303,7 +303,7 @@ export function AgentBridgeView() {
                         {/* Channel & Guild IDs */}
                         <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1">
-                                <Label className="text-[10px] text-muted-foreground/70">Channel ID</Label>
+                                <Label className="text-[10px] text-muted-foreground/70">频道 ID (Channel ID)</Label>
                                 <Input
                                     value={bridge.discordChannelId}
                                     onChange={e => setBridge(b => ({ ...b, discordChannelId: e.target.value }))}
@@ -312,7 +312,7 @@ export function AgentBridgeView() {
                                 />
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-[10px] text-muted-foreground/70">Guild ID</Label>
+                                <Label className="text-[10px] text-muted-foreground/70">服务器 ID (Guild ID)</Label>
                                 <Input
                                     value={bridge.discordGuildId}
                                     onChange={e => setBridge(b => ({ ...b, discordGuildId: e.target.value }))}
@@ -325,7 +325,7 @@ export function AgentBridgeView() {
                         {/* Step Limit & Allowed Bots */}
                         <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1">
-                                <Label className="text-[10px] text-muted-foreground/70">Step Soft Limit</Label>
+                                <Label className="text-[10px] text-muted-foreground/70">步骤软上限</Label>
                                 <Input
                                     type="number"
                                     value={bridge.stepSoftLimit}
@@ -336,7 +336,7 @@ export function AgentBridgeView() {
                                 />
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-[10px] text-muted-foreground/70">Allowed Bot IDs</Label>
+                                <Label className="text-[10px] text-muted-foreground/70">允许的机器人 ID 列表</Label>
                                 <Input
                                     value={bridge.allowedBotIds.join(', ')}
                                     onChange={e => setBridge(b => ({
@@ -357,14 +357,14 @@ export function AgentBridgeView() {
                                     onCheckedChange={v => setBridge(b => ({ ...b, autoStart: v }))}
                                     className="scale-75 origin-left"
                                 />
-                                <span className="text-[10px] text-muted-foreground/60">Auto-start on server boot</span>
+                                <span className="text-[10px] text-muted-foreground/60">服务端启动时自动开启</span>
                             </div>
 
                             <div className="flex items-center gap-2">
                                 {saveMsg && (
                                     <span className={cn("text-[10px] font-medium", saveMsg === 'saved' ? 'text-emerald-400' : 'text-red-400')}>
                                         {saveMsg === 'saved' ? <Check className="h-3 w-3 inline mr-0.5" /> : null}
-                                        {saveMsg === 'saved' ? 'Saved' : 'Error'}
+                                        {saveMsg === 'saved' ? '已保存' : '保存失败'}
                                     </span>
                                 )}
                                 <Button
@@ -375,7 +375,7 @@ export function AgentBridgeView() {
                                     className="h-7 text-[10px] gap-1 px-2.5"
                                 >
                                     <Save className="w-3 h-3" />
-                                    {saving ? 'Saving…' : 'Save'}
+                                    {saving ? '保存中…' : '保存'}
                                 </Button>
                             </div>
                         </div>
@@ -400,7 +400,7 @@ export function AgentBridgeView() {
                             <MessageSquare className="w-3 h-3" />
                             #{status.cascadeIdShort}
                         </span>
-                        <span className="font-mono">{status.stepCount}/{status.softLimit} steps</span>
+                        <span className="font-mono">{status.stepCount}/{status.softLimit} 步</span>
                     </div>
                     <div className="w-full h-1.5 rounded-full bg-muted/20 overflow-hidden">
                         <div
@@ -429,14 +429,14 @@ export function AgentBridgeView() {
                         </div>
                         <div className="text-center space-y-1">
                             <p className="text-xs text-muted-foreground/50 font-medium">
-                                {status.state === 'IDLE' ? 'Bridge not started' : 'Waiting for messages…'}
+                                {status.state === 'IDLE' ? '桥接未启动' : '等待消息中…'}
                             </p>
                             <p className="text-[10px] text-muted-foreground/30">
                                 {status.state === 'IDLE'
                                     ? canStart
-                                        ? 'Click Start to begin relaying between Antigravity ↔ Discord'
-                                        : 'Configure Discord credentials above to get started'
-                                    : 'Messages will appear here as they flow through the bridge'
+                                        ? '点击“启动”开始在 Antigravity ↔ Discord 之间中继消息'
+                                        : '请先在上方配置 Discord 凭据以开始使用'
+                                    : '消息经过桥接服务时将实时显示在此处'
                                 }
                             </p>
                         </div>
@@ -445,7 +445,7 @@ export function AgentBridgeView() {
                     status.log.map((entry, i) => {
                         const Icon = LOG_ICONS[entry.type] || MessageSquare;
                         const color = LOG_COLORS[entry.type] || 'text-muted-foreground/50';
-                        const time = new Date(entry.ts).toLocaleTimeString('vi-VN', {
+                        const time = new Date(entry.ts).toLocaleTimeString('zh-CN', {
                             hour: '2-digit', minute: '2-digit', second: '2-digit'
                         });
                         return (

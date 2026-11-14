@@ -98,7 +98,7 @@ export const ProcessingGroup = memo(function ProcessingGroup({ steps: groupSteps
                             >
                                 <ChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform duration-200 shrink-0', expanded && 'rotate-90')} />
                                 <span className="text-muted-foreground/80"><Wrench className="h-3 w-3 text-muted-foreground/80" /></span>
-                                <span className="font-semibold text-muted-foreground">{normalSteps.length} steps</span>
+                                <span className="font-semibold text-muted-foreground">{normalSteps.length} 个步骤</span>
                                 <span className="text-[10px] text-muted-foreground/50 truncate flex-1 text-left font-mono">{summary}</span>
                                 <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground/60 shrink-0">#{first}{first !== last ? `–${last}` : ''}</Badge>
                             </Button>

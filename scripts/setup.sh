@@ -1,37 +1,39 @@
 #!/usr/bin/env bash
-# === Antigravity Deck — One-Command Setup (macOS / Linux) ===
-# Usage: curl -sL https://raw.githubusercontent.com/tysonnbt/Antigravity-Deck/main/scripts/setup.sh | bash
+# === Antigravity Deck 中文版 — 一键安装与更新 (macOS / Linux) ===
+# 用法: curl -sL https://raw.githubusercontent.com/ooks37/Antigravity-Deck/main/scripts/setup.sh | bash
 
 set -e
 
-REPO="https://github.com/tysonnbt/Antigravity-Deck.git"
-REPO_API="https://api.github.com/repos/tysonnbt/Antigravity-Deck"
+REPO="https://github.com/ooks37/Antigravity-Deck.git"
+REPO_API="https://api.github.com/repos/ooks37/Antigravity-Deck"
 INSTALL_DIR="$HOME/.antigravity-deck"
 
-# --- Resolve latest release tag ---
-get_latest_tag() {
-    # Try GitHub API (no auth needed for public repos)
+# --- 解析目标版本引用（优先 AG_DECK_REF，其次本仓库正式 Release，默认追踪 main 分支）---
+get_latest_ref() {
+    if [ -n "${AG_DECK_REF:-}" ]; then
+        echo "$AG_DECK_REF"
+        return
+    fi
+    # 仅查询当前 fork 仓库自身发布的正式 Release，不回退到从上游同步过来的旧英文 tag
     local tag
     tag=$(curl -sL "$REPO_API/releases/latest" 2>/dev/null \
         | grep '"tag_name"' | head -1 \
         | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-    if [ -n "$tag" ] && [ "$tag" != "" ]; then echo "$tag"; return; fi
-    # Fallback: git ls-remote tags (sorted by version descending)
-    tag=$(git ls-remote --tags --sort=-v:refname "$REPO" 'v*' 2>/dev/null \
-        | head -1 | sed 's/.*refs\/tags\///' | sed 's/\^{}//')
-    if [ -n "$tag" ]; then echo "$tag"; return; fi
-    # Ultimate fallback: main branch
+    if [ -n "$tag" ]; then
+        echo "$tag"
+        return
+    fi
     echo "main"
 }
 
 echo ""
-echo "  🔮 Antigravity Deck — One-Command Setup"
-echo "  ========================================"
+echo "  🔮 Antigravity Deck 中文版 — 一键安装与更新"
+echo "  ============================================"
 echo ""
-echo "  Install location: $INSTALL_DIR"
+echo "  安装位置: $INSTALL_DIR"
 echo ""
 
-# --- Check prerequisites ---
+# --- 检查前置依赖 ---
 missing=()
 
 # Node.js
@@ -39,13 +41,13 @@ if command -v node &>/dev/null; then
     node_ver=$(node --version)
     major=$(echo "$node_ver" | sed 's/^v\([0-9]*\).*/\1/')
     if [ "$major" -lt 18 ]; then
-        echo "  ⚠️  Node.js $node_ver found, but v18+ required"
+        echo "  ⚠️  当前 Node.js 版本为 $node_ver，需要 v18 及以上"
         missing+=("Node.js 18+")
     else
         echo "  ✅ Node.js $node_ver"
     fi
 else
-    echo "  ❌ Node.js not found"
+    echo "  ❌ 未检测到 Node.js"
     missing+=("Node.js 18+")
 fi
 
@@ -53,11 +55,11 @@ fi
 if command -v git &>/dev/null; then
     echo "  ✅ $(git --version)"
 else
-    echo "  ❌ Git not found"
+    echo "  ❌ 未检测到 Git"
     missing+=("Git")
 fi
 
-# cloudflared (optional — only needed for npm run online)
+# cloudflared (可选 — 仅 npm run online 远程穿透时需要)
 cf_found=false
 if command -v cloudflared &>/dev/null; then
     cf_found=true
@@ -70,79 +72,86 @@ fi
 if $cf_found; then
     echo "  ✅ cloudflared"
 else
-    echo "  ⚠️  cloudflared not found (optional — needed for remote access)"
+    echo "  ⚠️  未检测到 cloudflared（可选 — 仅公网远程穿透时需要）"
 fi
 
 if [ ${#missing[@]} -gt 0 ]; then
     echo ""
-    echo "  Missing prerequisites:"
+    echo "  缺少以下前置依赖:"
     for m in "${missing[@]}"; do
         case "$m" in
-            "Node.js 18+") echo "    → Install Node.js: https://nodejs.org/" ;;
-            "Git")         echo "    → Install Git: https://git-scm.com/" ;;
+            "Node.js 18+") echo "    → 安装 Node.js: https://nodejs.org/" ;;
+            "Git")         echo "    → 安装 Git: https://git-scm.com/" ;;
         esac
     done
     echo ""
-    echo "  Install the missing tools and run this script again."
+    echo "  请先安装缺失工具，然后重新运行此脚本。"
     echo ""
     exit 1
 fi
 
 echo ""
 
-# === Detect scenario ===
+# === 检测安装/更新场景 ===
 scenario="fresh"       # fresh | up-to-date | updated
 updated_files=""
 
-TARGET_TAG=$(get_latest_tag)
+TARGET_REF=$(get_latest_ref)
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd "$INSTALL_DIR"
 
-    # Save current commit hash before update
-    hash_before=$(git rev-parse HEAD 2>/dev/null || echo "")
-    current_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+    # 确保 origin 指向当前 fork 仓库
+    git remote set-url origin "$REPO" 2>/dev/null || true
 
-    echo "  📂 Found existing install — checking for updates..."
+    # 记录更新前 commit hash
+    hash_before=$(git rev-parse HEAD 2>/dev/null || echo "")
+
+    echo "  📂 检测到已有安装 — 正在检查更新..."
 
     if git fetch origin --tags --quiet 2>/dev/null; then
-        # Re-resolve after fetch in case new tags appeared
-        TARGET_TAG=$(get_latest_tag)
+        TARGET_REF=$(get_latest_ref)
+        target_hash=$(git rev-parse --verify "refs/remotes/origin/$TARGET_REF^{commit}" 2>/dev/null \
+            || git rev-parse --verify "$TARGET_REF^{commit}" 2>/dev/null || echo "")
 
-        if [ "$current_tag" = "$TARGET_TAG" ]; then
+        if [ -n "$target_hash" ] && [ "$hash_before" = "$target_hash" ]; then
             scenario="up-to-date"
-            echo "  ✅ Already on latest release ($TARGET_TAG)"
+            echo "  ✅ 已是最新版本 ($TARGET_REF)"
         else
-            if [ -n "$current_tag" ]; then
-                echo "  📥 New release available: $current_tag → $TARGET_TAG"
+            echo "  📥 正在更新至 $TARGET_REF..."
+
+            if git show-ref --verify --quiet "refs/remotes/origin/$TARGET_REF"; then
+                git checkout -B "$TARGET_REF" "origin/$TARGET_REF" --quiet 2>/dev/null \
+                    || git checkout "$TARGET_REF" --quiet 2>/dev/null
             else
-                echo "  📥 Switching to release $TARGET_TAG..."
+                git -c advice.detachedHead=false checkout "$TARGET_REF" --quiet 2>/dev/null
             fi
 
-            git -c advice.detachedHead=false checkout "$TARGET_TAG" --quiet 2>/dev/null
-
-            hash_after=$(git rev-parse HEAD 2>/dev/null)
-
-            # List changed files between old and new
+            hash_after=$(git rev-parse HEAD 2>/dev/null || echo "")
             updated_files=$(git diff --name-only "$hash_before" "$hash_after" 2>/dev/null || echo "")
             scenario="updated"
 
-            echo "  ✅ Updated to $TARGET_TAG"
+            echo "  ✅ 已更新至 $TARGET_REF"
         fi
     else
-        echo "  ⚠️  Could not fetch updates (offline?) — continuing with current version"
+        echo "  ⚠️  拉取更新失败（可能处于离线状态）— 将继续使用当前版本"
         scenario="up-to-date"
     fi
 else
-    echo "  📥 First time setup — cloning repository..."
+    echo "  📥 首次安装 — 正在克隆仓库..."
     mkdir -p "$INSTALL_DIR"
     git clone "$REPO" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
-    git -c advice.detachedHead=false checkout "$TARGET_TAG" --quiet 2>/dev/null
-    echo "  ✅ Installed $TARGET_TAG"
+    if git show-ref --verify --quiet "refs/remotes/origin/$TARGET_REF"; then
+        git checkout -B "$TARGET_REF" "origin/$TARGET_REF" --quiet 2>/dev/null \
+            || git checkout "$TARGET_REF" --quiet 2>/dev/null
+    else
+        git -c advice.detachedHead=false checkout "$TARGET_REF" --quiet 2>/dev/null
+    fi
+    echo "  ✅ 已安装 $TARGET_REF"
 fi
 
-# === Smart dependency install ===
+# === 按需安装依赖 ===
 need_backend_deps=false
 need_frontend_deps=false
 
@@ -152,7 +161,6 @@ case "$scenario" in
         need_frontend_deps=true
         ;;
     "updated")
-        # Only reinstall if package files changed
         if echo "$updated_files" | grep -qE "^package\.json$|^package-lock\.json$"; then
             need_backend_deps=true
         fi
@@ -160,9 +168,8 @@ case "$scenario" in
             need_frontend_deps=true
         fi
 
-        # Show what changed
         echo ""
-        echo "  📋 Changes in this update:"
+        echo "  📋 本次更新变更摘要:"
 
         be_count=$(echo "$updated_files" | grep -cvE "^frontend/|^scripts/|^docs/|^electron/|^$" || true)
         fe_count=$(echo "$updated_files" | grep -c "^frontend/" || true)
@@ -170,14 +177,13 @@ case "$scenario" in
         sc_count=$(echo "$updated_files" | grep -c "^scripts/" || true)
         doc_count=$(echo "$updated_files" | grep -c "^docs/" || true)
 
-        [ "$be_count" -gt 0 ] 2>/dev/null && echo "    Backend: $be_count file(s)"
-        [ "$fe_count" -gt 0 ] 2>/dev/null && echo "    Frontend: $fe_count file(s)"
-        [ "$el_count" -gt 0 ] 2>/dev/null && echo "    Electron: $el_count file(s)"
-        [ "$sc_count" -gt 0 ] 2>/dev/null && echo "    Scripts: $sc_count file(s)"
-        [ "$doc_count" -gt 0 ] 2>/dev/null && echo "    Docs: $doc_count file(s)"
+        [ "$be_count" -gt 0 ] 2>/dev/null && echo "    后端: $be_count 个文件"
+        [ "$fe_count" -gt 0 ] 2>/dev/null && echo "    前端: $fe_count 个文件"
+        [ "$el_count" -gt 0 ] 2>/dev/null && echo "    Electron: $el_count 个文件"
+        [ "$sc_count" -gt 0 ] 2>/dev/null && echo "    脚本: $sc_count 个文件"
+        [ "$doc_count" -gt 0 ] 2>/dev/null && echo "    文档: $doc_count 个文件"
         ;;
     "up-to-date")
-        # Check if node_modules exist (maybe user deleted them)
         if [ ! -d "$INSTALL_DIR/node_modules" ]; then
             need_backend_deps=true
         fi
@@ -190,30 +196,30 @@ esac
 echo ""
 
 if $need_backend_deps; then
-    echo "  📦 Installing backend dependencies..."
+    echo "  📦 正在安装后端依赖..."
     npm install
 else
-    echo "  ✅ Backend dependencies — no changes"
+    echo "  ✅ 后端依赖无变更，跳过安装"
 fi
 
 if $need_frontend_deps; then
     echo ""
-    echo "  📦 Installing frontend dependencies..."
+    echo "  📦 正在安装前端依赖..."
     npm install --prefix frontend
 else
-    echo "  ✅ Frontend dependencies — no changes"
+    echo "  ✅ 前端依赖无变更，跳过安装"
 fi
 
-# --- Create settings.json if missing ---
+# --- 初始化配置文件 ---
 if [ ! -f "settings.json" ]; then
     cp settings.sample.json settings.json
-    echo "  📝 Created settings.json from sample"
+    echo "  📝 已从模板生成 settings.json"
 fi
 
 
-# === Launch ===
+# === 启动服务 ===
 echo ""
-echo "  Starting Antigravity Deck..."
+echo "  正在启动 Antigravity Deck..."
 echo ""
 
 if $cf_found; then

@@ -71,11 +71,11 @@ type TabId = 'workflows' | 'skills' | 'rules';
 // === Helpers ===
 
 function workflowName(w: WorkflowSpec): string {
-    return w.name ?? w.path ?? '(unnamed)';
+    return w.name ?? w.path ?? '（未命名）';
 }
 
 function ruleName(r: CortexMemory): string {
-    return r.title ?? r.memoryId ?? '(unnamed)';
+    return r.title ?? r.memoryId ?? '（未命名）';
 }
 
 /** True for the AbortError thrown when a fetch is cancelled (expected, not a user error). */
@@ -101,13 +101,13 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
         <div className="flex items-center justify-center py-16">
             <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                 <AlertTriangle className="w-6 h-6 text-red-400/60" />
-                <span className="text-sm font-medium text-foreground/70">Failed to load</span>
+                <span className="text-sm font-medium text-foreground/70">加载失败</span>
                 <span className="text-xs text-muted-foreground font-mono break-all">{message}</span>
                 <button
                     onClick={onRetry}
                     className="text-xs px-3 py-1.5 rounded-lg bg-muted/40 hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors border border-border/30"
                 >
-                    Retry
+                    重试
                 </button>
             </div>
         </div>
@@ -173,7 +173,7 @@ function ListTable({ columnLabel, children }: { columnLabel: string; children: R
         <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
             <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-2 text-[10px] text-muted-foreground/50 uppercase tracking-wider font-medium border-b border-border/30 bg-muted/10">
                 <span>{columnLabel}</span>
-                <span>Scope</span>
+                <span>作用域</span>
             </div>
             <div className="divide-y divide-border/20">{children}</div>
         </div>
@@ -182,7 +182,7 @@ function ListTable({ columnLabel, children }: { columnLabel: string; children: R
 
 const builtinBadge = (
     <span className="text-[9px] font-medium text-muted-foreground/50 bg-muted/40 px-1 py-0.5 rounded shrink-0">
-        builtin
+        内置
     </span>
 );
 
@@ -224,7 +224,7 @@ function SpecList({
                                     {w.isBuiltin && builtinBadge}
                                     {showTurbo && w.turbo && (
                                         <span className="text-[9px] font-medium text-amber-400/70 bg-amber-500/10 px-1 py-0.5 rounded shrink-0">
-                                            turbo
+                                            极速
                                         </span>
                                     )}
                                 </div>
@@ -232,7 +232,7 @@ function SpecList({
                                     <p className="text-xs text-muted-foreground/60 pl-6 line-clamp-2">{w.description as string}</p>
                                 )}
                                 {w.pluginName && (
-                                    <p className="text-[10px] text-muted-foreground/40 pl-6 font-mono truncate">plugin: {w.pluginName as string}</p>
+                                    <p className="text-[10px] text-muted-foreground/40 pl-6 font-mono truncate">插件: {w.pluginName as string}</p>
                                 )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0 mt-0.5">
@@ -240,14 +240,14 @@ function SpecList({
                                     <button
                                         onClick={() => onCopy(w)}
                                         disabled={isCopying}
-                                        title="Copy to workspace for editing"
+                                        title="复制到工作区以便编辑"
                                         className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors border border-border/20 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
                                         {isCopying
                                             ? <Loader2 className="w-3 h-3 animate-spin" />
                                             : <Copy className="w-3 h-3" />
                                         }
-                                        Copy
+                                        复制
                                     </button>
                                 )}
                                 {w.scope && (
@@ -260,7 +260,7 @@ function SpecList({
                         {copyErr && (
                             <div className="px-4 pb-2 -mt-1">
                                 <p className="text-[10px] text-red-400/80 font-mono bg-red-500/5 border border-red-500/10 rounded px-2 py-1 break-all">
-                                    Copy failed: {copyErr}
+                                    复制失败: {copyErr}
                                 </p>
                             </div>
                         )}
@@ -273,7 +273,7 @@ function SpecList({
 
 function RuleList({ items }: { items: CortexMemory[] }) {
     return (
-        <ListTable columnLabel="Rule">
+        <ListTable columnLabel="规则">
             {items.map((r, i) => (
                 <ListRow
                     key={r.memoryId ?? r.absolutePath ?? String(i)}
@@ -302,9 +302,9 @@ function NoWorkspaceState() {
         <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                 <FolderOpen className="w-8 h-8 text-muted-foreground/30" />
-                <span className="text-sm font-medium text-foreground/70">No workspace open</span>
+                <span className="text-sm font-medium text-foreground/70">尚未打开工作区</span>
                 <span className="text-xs text-muted-foreground">
-                    Open a workspace folder in Antigravity IDE to browse workflows, skills, and rules.
+                    请在 Antigravity IDE 中打开工作区文件夹，以浏览工作流、技能与规则。
                 </span>
             </div>
         </div>
@@ -372,7 +372,7 @@ export function WorkflowsView() {
             })
             .catch((e: unknown) => {
                 if (isAbortError(e)) return;
-                setWsError(e instanceof Error ? e.message : 'Failed to load workspace info');
+                setWsError(e instanceof Error ? e.message : '加载工作区信息失败');
                 setWorkspaceUris([]);
             })
             .finally(() => {
@@ -397,7 +397,7 @@ export function WorkflowsView() {
                 .then(res => setWorkflowsTab({ data: res.workflows ?? [], isLoading: false, error: null }))
                 .catch((e: unknown) => {
                     if (isAbortError(e)) return;
-                    setWorkflowsTab({ data: null, isLoading: false, error: e instanceof Error ? e.message : 'Failed to load workflows' });
+                    setWorkflowsTab({ data: null, isLoading: false, error: e instanceof Error ? e.message : '加载工作流失败' });
                 });
         } else if (tab === 'skills') {
             setSkillsTab(prev => ({ ...prev, isLoading: true, error: null }));
@@ -405,7 +405,7 @@ export function WorkflowsView() {
                 .then(res => setSkillsTab({ data: res.skills ?? [], isLoading: false, error: null }))
                 .catch((e: unknown) => {
                     if (isAbortError(e)) return;
-                    setSkillsTab({ data: null, isLoading: false, error: e instanceof Error ? e.message : 'Failed to load skills' });
+                    setSkillsTab({ data: null, isLoading: false, error: e instanceof Error ? e.message : '加载技能失败' });
                 });
         } else {
             setRulesTab(prev => ({ ...prev, isLoading: true, error: null }));
@@ -413,7 +413,7 @@ export function WorkflowsView() {
                 .then(res => setRulesTab({ data: res.memories ?? [], isLoading: false, error: null }))
                 .catch((e: unknown) => {
                     if (isAbortError(e)) return;
-                    setRulesTab({ data: null, isLoading: false, error: e instanceof Error ? e.message : 'Failed to load rules' });
+                    setRulesTab({ data: null, isLoading: false, error: e instanceof Error ? e.message : '加载规则失败' });
                 });
         }
     }, []);
@@ -436,12 +436,12 @@ export function WorkflowsView() {
                     setWorkflowsTab({ data: res.workflows ?? [], isLoading: false, error: null });
                 } catch (re: unknown) {
                     if (!isAbortError(re)) {
-                        setWorkflowsTab({ data: null, isLoading: false, error: re instanceof Error ? re.message : 'Failed to load workflows' });
+                        setWorkflowsTab({ data: null, isLoading: false, error: re instanceof Error ? re.message : '加载工作流失败' });
                     }
                 }
             }
         } catch (e: unknown) {
-            setCopyErrors(prev => ({ ...prev, [key]: e instanceof Error ? e.message : 'Copy failed' }));
+            setCopyErrors(prev => ({ ...prev, [key]: e instanceof Error ? e.message : '复制失败' }));
         } finally {
             setCopyingPath(null);
         }
@@ -461,7 +461,7 @@ export function WorkflowsView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <Activity className="w-8 h-8 text-muted-foreground/50 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">Detecting workspace...</span>
+                    <span className="text-sm text-muted-foreground">正在检测工作区...</span>
                 </div>
             </div>
         );
@@ -472,7 +472,7 @@ export function WorkflowsView() {
             <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3 max-w-sm text-center">
                     <AlertTriangle className="w-8 h-8 text-red-400/60" />
-                    <span className="text-sm font-medium text-foreground/70">Failed to detect workspace</span>
+                    <span className="text-sm font-medium text-foreground/70">检测工作区失败</span>
                     <span className="text-xs text-muted-foreground font-mono break-all">{wsError}</span>
                 </div>
             </div>
@@ -496,9 +496,9 @@ export function WorkflowsView() {
                         <Workflow className="w-5 h-5 text-violet-400" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold">Workflows / Skills / Rules</h2>
+                        <h2 className="text-lg font-semibold">工作流 / 技能 / 规则</h2>
                         <p className="text-xs text-muted-foreground">
-                            Read-only view of extensibility items from the active workspace
+                            查看当前活动工作区中的扩展配置项（只读视图）
                         </p>
                     </div>
                     {currentTab.isLoading && (
@@ -511,36 +511,36 @@ export function WorkflowsView() {
                     <TabsList className="w-full justify-start">
                         <TabsTrigger value="workflows" className="flex items-center gap-1.5">
                             <Workflow className="w-3.5 h-3.5" />
-                            Workflows
+                            工作流
                         </TabsTrigger>
                         <TabsTrigger value="skills" className="flex items-center gap-1.5">
                             <BookOpen className="w-3.5 h-3.5" />
-                            Skills
+                            技能
                         </TabsTrigger>
                         <TabsTrigger value="rules" className="flex items-center gap-1.5">
                             <ScrollText className="w-3.5 h-3.5" />
-                            Rules
+                            规则
                         </TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="workflows">
-                        <TabContent tab={workflowsTab} loadingLabel="Loading workflows..." onRetry={() => fetchTab('workflows', uris)}>
+                        <TabContent tab={workflowsTab} loadingLabel="正在加载工作流..." onRetry={() => fetchTab('workflows', uris)}>
                             {(items) => items.length === 0
-                                ? <EmptyState icon={Workflow} title="No workflows found" hint="Add workflow files to your workspace to see them here." />
-                                : <SpecList items={items} icon={Workflow} iconColor="text-violet-400/60" columnLabel="Workflow" showTurbo onCopy={handleCopyWorkflow} copyingPath={copyingPath} copyErrors={copyErrors} />}
+                                ? <EmptyState icon={Workflow} title="未找到工作流" hint="请在工作区中添加工作流文件后查看。" />
+                                : <SpecList items={items} icon={Workflow} iconColor="text-violet-400/60" columnLabel="工作流" showTurbo onCopy={handleCopyWorkflow} copyingPath={copyingPath} copyErrors={copyErrors} />}
                         </TabContent>
                     </TabsContent>
                     <TabsContent value="skills">
-                        <TabContent tab={skillsTab} loadingLabel="Loading skills..." onRetry={() => fetchTab('skills', uris)}>
+                        <TabContent tab={skillsTab} loadingLabel="正在加载技能..." onRetry={() => fetchTab('skills', uris)}>
                             {(items) => items.length === 0
-                                ? <EmptyState icon={BookOpen} title="No skills found" hint="Install skills from the Antigravity plugin marketplace to see them here." />
-                                : <SpecList items={items} icon={BookOpen} iconColor="text-emerald-400/60" columnLabel="Skill" showTurbo={false} />}
+                                ? <EmptyState icon={BookOpen} title="未找到技能" hint="从 Antigravity 插件市场安装技能后将显示在此处。" />
+                                : <SpecList items={items} icon={BookOpen} iconColor="text-emerald-400/60" columnLabel="技能" showTurbo={false} />}
                         </TabContent>
                     </TabsContent>
                     <TabsContent value="rules">
-                        <TabContent tab={rulesTab} loadingLabel="Loading rules..." onRetry={() => fetchTab('rules', uris)}>
+                        <TabContent tab={rulesTab} loadingLabel="正在加载规则..." onRetry={() => fetchTab('rules', uris)}>
                             {(items) => items.length === 0
-                                ? <EmptyState icon={ScrollText} title="No rules found" hint="Add rule files to your workspace to inject persistent instructions into the agent." />
+                                ? <EmptyState icon={ScrollText} title="未找到规则" hint="在工作区添加规则文件，即可为助手注入持久化指令。" />
                                 : <RuleList items={items} />}
                         </TabContent>
                     </TabsContent>
@@ -548,7 +548,7 @@ export function WorkflowsView() {
 
                 {/* Footer */}
                 <p className="text-center text-[10px] text-muted-foreground/40 pb-4">
-                    Builtin workflows can be copied to your workspace for customization. Manage skills and rules via Antigravity IDE settings.
+                    可将内置工作流复制到当前工作区进行自定义编辑；技能与规则请通过 Antigravity IDE 设置进行管理。
                 </p>
             </div>
         </div>

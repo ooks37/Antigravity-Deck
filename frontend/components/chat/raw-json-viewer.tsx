@@ -12,7 +12,7 @@ export const RawJsonViewer = memo(function RawJsonViewer({ step }: { step: Step 
             <SheetTrigger asChild>
                 <button
                     className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-mono"
-                    title="View raw JSON"
+                    title="查看原始 JSON"
                 >
                     {'{ }'}
                 </button>
@@ -21,7 +21,7 @@ export const RawJsonViewer = memo(function RawJsonViewer({ step }: { step: Step 
                 <SheetHeader className="px-5 pt-5 pb-3 border-b border-border/50 shrink-0">
                     <SheetTitle className="flex items-center gap-2 text-sm">
                         <span className="text-green-400 font-mono text-xs">{'{ }'}</span>
-                        <span>Raw Step JSON</span>
+                        <span>步骤原始 JSON 数据</span>
                     </SheetTitle>
                     <SheetDescription className="text-xs font-mono text-muted-foreground/70">
                         {stepType} · {String(step.status || '').replace('CORTEX_STEP_STATUS_', '')}

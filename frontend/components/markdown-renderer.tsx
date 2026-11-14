@@ -12,7 +12,7 @@ import vscDarkPlus from 'react-syntax-highlighter/dist/esm/styles/prism/vsc-dark
 // Lazy-load syntax highlighter (heavy)
 const SyntaxHighlighter = dynamic(
     () => import('react-syntax-highlighter').then(m => m.Prism),
-    { ssr: false, loading: () => <div className="p-4 text-xs text-muted-foreground/50">Loading…</div> }
+    { ssr: false, loading: () => <div className="p-4 text-xs text-muted-foreground/50">加载中…</div> }
 );
 
 // ── CCI link parser ──────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ function FileViewerModal({ target, onClose }: { target: CciTarget; onClose: () =
             .then(r => r.json())
             .then(d => {
                 if (d.content !== undefined) setContent(d.content);
-                else setError(d.error || 'Failed to load');
+                else setError(d.error || '加载失败');
             })
             .catch(e => setError(e.message));
     }, [target.path]);
@@ -112,7 +112,7 @@ function FileViewerModal({ target, onClose }: { target: CciTarget; onClose: () =
                     <a
                         href={`vscode://file/${target.path}:${target.startLine}`}
                         className="p-1 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground/70 transition-all"
-                        title="Open in VS Code"
+                        title="在 VS Code 中打开"
                         onClick={e => e.stopPropagation()}
                     >
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -130,7 +130,7 @@ function FileViewerModal({ target, onClose }: { target: CciTarget; onClose: () =
                     {!content && !error && (
                         <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground/40">
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-xs">Loading…</span>
+                            <span className="text-xs">加载中…</span>
                         </div>
                     )}
                     {error && (
@@ -190,7 +190,7 @@ function CciLink({ href, children }: { href: string; children: React.ReactNode }
             <button
                 onClick={handleClick}
                 className="inline-flex items-center gap-0.5 text-primary/80 hover:text-primary underline decoration-dotted underline-offset-2 transition-colors cursor-pointer"
-                title={`View file: ${href}`}
+                title={`查看文件: ${href}`}
             >
                 <FileCode2 className="w-3 h-3 opacity-60 shrink-0" />
                 {children}
@@ -282,8 +282,8 @@ function CopyButton({ text }: { text: string }) {
         setTimeout(() => setCopied(false), 2000);
     }, [text]);
     return (
-        <button onClick={handleCopy} className="copy-btn" title="Copy code">
-            {copied ? <><Check className="h-3 w-3 mr-1 inline" />Copied</> : <><Copy className="h-3 w-3 mr-1 inline" />Copy</>}
+        <button onClick={handleCopy} className="copy-btn" title="复制代码">
+            {copied ? <><Check className="h-3 w-3 mr-1 inline" />已复制</> : <><Copy className="h-3 w-3 mr-1 inline" />复制</>}
         </button>
     );
 }

@@ -239,6 +239,7 @@ if (AUTH_KEY) {
   app.use('/api/settings', strictLimiter);
   app.use('/api/launch-ide', strictLimiter);
   app.use('/api/kill-ide', strictLimiter);
+  app.use('/api/agy/update', strictLimiter);
 } else {
   console.log('  ⚠️  No AUTH_KEY set — API is open (safe for local dev)');
 }

@@ -44,18 +44,18 @@ export function Timeline({ steps, onSelectStep }: TimelineProps) {
                             />
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="text-[10px]">
-                            #{idx + 1} {isUserFacing ? 'Agent' : `${config.icon} ${config.label}`}
+                            #{idx + 1} {isUserFacing ? '智能体' : `${config.icon} ${config.label}`}
                         </TooltipContent>
                     </Tooltip>
                 ))}
             </div>
             <div className="flex items-center justify-between mt-1">
-                <span className="text-[9px] text-muted-foreground">Step #1</span>
+                <span className="text-[9px] text-muted-foreground">步骤 #1</span>
                 <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-500 inline-block" /> User</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500 inline-block" /> Agent</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500 inline-block" /> Tool</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> System</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-500 inline-block" /> 用户</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500 inline-block" /> 智能体</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500 inline-block" /> 工具</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> 系统</span>
                 </div>
                 <span className="text-[9px] text-muted-foreground">#{steps.length}</span>
             </div>

@@ -1,24 +1,24 @@
-# === Antigravity Deck -- Uninstall (Windows PowerShell) ===
-# Usage: irm https://raw.githubusercontent.com/tysonnbt/Antigravity-Deck/main/scripts/uninstall.ps1 | iex
+﻿# === Antigravity Deck 中文版 -- 一键卸载 (Windows PowerShell) ===
+# 用法: irm https://raw.githubusercontent.com/ooks37/Antigravity-Deck/main/scripts/uninstall.ps1 | iex
 
 $ErrorActionPreference = "SilentlyContinue"
 $INSTALL_DIR = Join-Path $env:LOCALAPPDATA "AntigravityDeck"
 
 Write-Host ""
-Write-Host "  Antigravity Deck -- Uninstall" -ForegroundColor Cyan
+Write-Host "  Antigravity Deck -- 卸载程序" -ForegroundColor Cyan
 Write-Host "  ==============================" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  Install location: $INSTALL_DIR" -ForegroundColor DarkGray
+Write-Host "  安装位置: $INSTALL_DIR" -ForegroundColor DarkGray
 Write-Host ""
 
 if (-not (Test-Path $INSTALL_DIR)) {
-    Write-Host "  [i] Nothing to uninstall -- directory not found." -ForegroundColor Yellow
+    Write-Host "  [i] 无需卸载 -- 未找到安装目录。" -ForegroundColor Yellow
     Write-Host ""
     return
 }
 
-# --- Kill processes with open handles inside the install dir ---
-Write-Host "  [i] Checking for running processes..." -ForegroundColor Cyan
+# --- 终止占用安装目录的运行中进程 ---
+Write-Host "  [i] 正在检查运行中的进程..." -ForegroundColor Cyan
 
 $killed = @()
 
@@ -30,7 +30,7 @@ foreach ($proc in $procs) {
         if ($cmdLine -and $cmdLine -like "*$INSTALL_DIR*") {
             Stop-Process -Id $proc.ProcessId -Force 2>$null
             $killed += $proc.ProcessId
-            Write-Host "  [OK] Killed node.exe (PID $($proc.ProcessId))" -ForegroundColor Green
+            Write-Host "  [OK] 已终止 node.exe (PID $($proc.ProcessId))" -ForegroundColor Green
         }
     } catch { }
 }
@@ -46,7 +46,7 @@ foreach ($procName in $allProcs) {
                 if ($killed -notcontains $proc.ProcessId) {
                     Stop-Process -Id $proc.ProcessId -Force 2>$null
                     $killed += $proc.ProcessId
-                    Write-Host "  [OK] Killed $procName (PID $($proc.ProcessId))" -ForegroundColor Green
+                    Write-Host "  [OK] 已终止 $procName (PID $($proc.ProcessId))" -ForegroundColor Green
                 }
             }
         } catch { }
@@ -63,7 +63,7 @@ foreach ($path in @("handle64.exe", "handle.exe")) {
 }
 
 if ($handleTool) {
-    Write-Host "  [i] Scanning open file handles (Sysinternals)..." -ForegroundColor DarkGray
+    Write-Host "  [i] 正在扫描占用文件句柄 (Sysinternals)..." -ForegroundColor DarkGray
     $output = & $handleTool $INSTALL_DIR -accepteula 2>$null
     $handlePids = $output | Select-String "pid: (\d+)" | ForEach-Object {
         $_.Matches[0].Groups[1].Value
@@ -71,16 +71,16 @@ if ($handleTool) {
     foreach ($procPid in $handlePids) {
         try {
             Stop-Process -Id ([int]$procPid) -Force 2>$null
-            Write-Host "  [OK] Killed PID $procPid (via handle scan)" -ForegroundColor Green
+            Write-Host "  [OK] 已终止 PID $procPid (via handle scan)" -ForegroundColor Green
         } catch { }
     }
 }
 
 if ($killed.Count -gt 0) {
-    Write-Host "  [i] Waiting for processes to exit..." -ForegroundColor DarkGray
+    Write-Host "  [i] 等待进程退出..." -ForegroundColor DarkGray
     Start-Sleep -Seconds 2
 } else {
-    Write-Host "  [OK] No running processes found" -ForegroundColor Green
+    Write-Host "  [OK] 未发现运行中的进程" -ForegroundColor Green
 }
 
 Write-Host ""
@@ -91,7 +91,7 @@ if ((Get-Location).Path -like "$INSTALL_DIR*") {
 }
 
 # --- Delete the install directory ---
-Write-Host "  [i] Removing $INSTALL_DIR ..." -ForegroundColor Cyan
+Write-Host "  [i] 正在删除 $INSTALL_DIR ..." -ForegroundColor Cyan
 
 # Attempt 1: cmd /c rd -- bypasses PowerShell file locks
 $rdArgs = '/c rd /s /q "' + $INSTALL_DIR + '"'
@@ -99,13 +99,13 @@ Start-Process "cmd.exe" -ArgumentList $rdArgs -Wait -WindowStyle Hidden
 Start-Sleep -Seconds 1
 
 if (-not (Test-Path $INSTALL_DIR)) {
-    Write-Host "  [OK] Antigravity Deck has been removed." -ForegroundColor Green
+    Write-Host "  [OK] Antigravity Deck 已卸载完成。" -ForegroundColor Green
     Write-Host ""
     return
 }
 
 # Attempt 2: robocopy mirror + rd
-Write-Host "  [!] Trying robocopy mirror..." -ForegroundColor Yellow
+Write-Host "  [!] 尝试使用 robocopy 清空目录..." -ForegroundColor Yellow
 $emptyDir = Join-Path $env:TEMP ("ag_empty_" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $emptyDir | Out-Null
 $roboArgs = '"' + $emptyDir + '" "' + $INSTALL_DIR + '" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP'
@@ -116,24 +116,24 @@ Start-Process "cmd.exe" -ArgumentList $rdArgs2 -Wait -WindowStyle Hidden
 Start-Sleep -Seconds 1
 
 if (-not (Test-Path $INSTALL_DIR)) {
-    Write-Host "  [OK] Antigravity Deck has been removed." -ForegroundColor Green
+    Write-Host "  [OK] Antigravity Deck 已卸载完成。" -ForegroundColor Green
     Write-Host ""
     return
 }
 
 # Attempt 3: Schedule deletion on next reboot via registry
-Write-Host "  [!] Files still locked -- scheduling deletion on next reboot..." -ForegroundColor Yellow
+Write-Host "  [!] 文件仍被占用 -- 尝试安排在下次重启时自动删除..." -ForegroundColor Yellow
 try {
     $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
     $existing = (Get-ItemProperty -Path $regPath -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue).PendingFileRenameOperations
     $newEntry = "\??\$INSTALL_DIR", ""
     if ($existing) { $newEntry = $existing + $newEntry }
     Set-ItemProperty -Path $regPath -Name "PendingFileRenameOperations" -Value $newEntry -ErrorAction Stop
-    Write-Host "  [OK] Scheduled. The folder will be deleted automatically on next reboot." -ForegroundColor Green
-    Write-Host "       Please restart your PC to complete uninstall." -ForegroundColor DarkGray
+    Write-Host "  [OK] 已加入重启清理计划，重启系统后将自动删除该目录。" -ForegroundColor Green
+    Write-Host "       请重启电脑以完成卸载。" -ForegroundColor DarkGray
 } catch {
-    Write-Host "  [!] Could not schedule reboot deletion (run as Administrator to enable this)." -ForegroundColor Red
-    Write-Host "      Manual fix: close all Explorer windows and terminals, then run:" -ForegroundColor Yellow
+    Write-Host "  [!] 无法设置重启自动删除（请以管理员身份运行）。" -ForegroundColor Red
+    Write-Host "      手动清理方式：关闭所有资源管理器与终端窗口后执行:" -ForegroundColor Yellow
     $manualCmd = 'cmd /c rd /s /q "' + $INSTALL_DIR + '"'
     Write-Host "      $manualCmd" -ForegroundColor White
 }

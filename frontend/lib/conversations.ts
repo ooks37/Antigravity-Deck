@@ -40,22 +40,22 @@ interface RawSummary {
     workspaces?: RawWorkspaceRef[];
 }
 
-/** Compact relative time, e.g. "now", "5m", "3h", "2d", "4mo", "1y". */
+/** Compact relative time, e.g. "刚刚", "5分钟前", "3小时前", "2天前". */
 export function relTime(iso: string): string {
     if (!iso) return '';
     const t = new Date(iso).getTime();
     if (isNaN(t)) return '';
     const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
-    if (s < 60) return 'now';
+    if (s < 60) return '刚刚';
     const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m`;
+    if (m < 60) return `${m}分钟`;
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h`;
+    if (h < 24) return `${h}小时`;
     const d = Math.floor(h / 24);
-    if (d < 30) return `${d}d`;
+    if (d < 30) return `${d}天`;
     const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo}mo`;
-    return `${Math.floor(mo / 12)}y`;
+    if (mo < 12) return `${mo}个月`;
+    return `${Math.floor(mo / 12)}年`;
 }
 
 /** Normalize a file:// URI for comparison: decode (c%3A→c:), lowercase, strip trailing slashes. */
@@ -110,7 +110,7 @@ export async function loadConversationIndex(): Promise<{ projects: Project[]; ro
         const projectName = proj?.name || repoName || basename(wsUri) || '';
         return {
             id,
-            title: s.summary || 'Untitled conversation',
+            title: s.summary || '未命名对话',
             projectId: pid,
             projectName,
             lastModified: s.lastModifiedTime || s.createdTime || '',

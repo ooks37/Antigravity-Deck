@@ -89,7 +89,7 @@ export const WorkflowAutocomplete = forwardRef<WorkflowAutocompleteHandle, Workf
                         <span className="font-mono text-sm font-medium text-primary shrink-0">{w.slash}</span>
                         <span className="text-xs text-muted-foreground truncate">{w.description || w.label}</span>
                         {w.source === 'workspace' && (
-                            <span className="ml-auto text-[9px] text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded shrink-0">ws</span>
+                            <span className="ml-auto text-[9px] text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded shrink-0">工作区</span>
                         )}
                     </div>
                 ))}

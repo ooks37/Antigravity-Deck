@@ -40,12 +40,12 @@ export function UserProfile() {
                     </AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col min-w-0">
-                    <div className="text-xs font-semibold text-white/90 truncate tracking-tight">{user.name || 'User'}</div>
+                    <div className="text-xs font-semibold text-white/90 truncate tracking-tight">{user.name || '用户'}</div>
                     <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium tracking-wide uppercase">
                             {user.userTier?.name || user.planStatus?.planInfo?.planName || 'PRO'}
                         </span>
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,183,127,0.6)]" title="Connected" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,183,127,0.6)]" title="已连接" />
                     </div>
                 </div>
             </div>
@@ -67,15 +67,15 @@ interface Model {
     resetTime: string | null;
 }
 
-/** Format a countdown string like "21d 7h" */
+/** Format a countdown string like "21天 7小时" */
 function formatCountdown(target: Date): string {
     const diff = target.getTime() - Date.now();
-    if (diff <= 0) return 'Resetting soon...';
+    if (diff <= 0) return '即将重置...';
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    if (days > 0) return `${days}d ${hours}h`;
+    if (days > 0) return `${days}天 ${hours}小时`;
     const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${mins}m`;
+    return `${hours}小时 ${mins}分`;
 }
 
 export function AccountInfoView() {
@@ -132,9 +132,9 @@ export function AccountInfoView() {
         return times.length > 0 ? new Date(Math.min(...times)) : null;
     }, [models]);
     const countdown = useMemo(() => resetDate ? formatCountdown(resetDate) : '—', [now, resetDate]);
-    const resetDateStr = useMemo(() => resetDate ? resetDate.toLocaleString('en-US', {
+    const resetDateStr = useMemo(() => resetDate ? resetDate.toLocaleString('zh-CN', {
         month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-    }) : 'Unknown', [resetDate]);
+    }) : '未知', [resetDate]);
 
     if (loading) {
         return (
@@ -159,11 +159,11 @@ export function AccountInfoView() {
                 {/* Header */}
                 <div className="flex items-center gap-2">
                     <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <Zap className="h-3.5 w-3.5" /> Account & Plan
+                        <Zap className="h-3.5 w-3.5" /> 账户与配额
                     </h2>
                     <div className="flex-1 h-px bg-border/30" />
                     <Button variant="outline" size="sm" onClick={loadData} className="h-7 text-[10px]">
-                        <RefreshCw className="h-3 w-3" /> Refresh
+                        <RefreshCw className="h-3 w-3" /> 刷新
                     </Button>
                 </div>
 
@@ -178,7 +178,7 @@ export function AccountInfoView() {
                             </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
-                            <div className="text-base font-semibold">{user?.name || 'User'}</div>
+                            <div className="text-base font-semibold">{user?.name || '用户'}</div>
                             {user?.email && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
                         </div>
                     </div>
@@ -190,7 +190,7 @@ export function AccountInfoView() {
                         )}
                         {planName && (
                             <Badge variant="outline" className="border-purple-500/30 text-purple-400">
-                                {planName} Plan
+                                {planName} 方案
                             </Badge>
                         )}
                     </div>
@@ -202,7 +202,7 @@ export function AccountInfoView() {
                 {/* Model Usage */}
                 <div>
                     <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                        <User className="h-3 w-3" /> Model Usage
+                        <User className="h-3 w-3" /> 模型余量统计
                     </h3>
                     <div className="space-y-2">
                         {models.map((model, i) => {
@@ -248,7 +248,7 @@ export function AccountInfoView() {
                                 <Calendar className="h-4 w-4 text-amber-400" />
                             </div>
                             <div>
-                                <div className="text-xs font-medium">Credits Reset</div>
+                                <div className="text-xs font-medium">额度重置时间</div>
                                 <div className="text-[10px] text-muted-foreground">{resetDateStr}</div>
                             </div>
                         </div>

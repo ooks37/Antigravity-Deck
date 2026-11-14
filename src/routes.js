@@ -4,6 +4,7 @@
 
 function setupRoutes(app) {
     require('./routes/system')(app);
+    require('./routes/agy')(app);
     require('./routes/profiles')(app);
     require('./routes/settings')(app);
     require('./routes/push')(app);

@@ -1,7 +1,7 @@
 {
   "name": "Antigravity Deck",
   "short_name": "AG Deck",
-  "description": "Real-time Antigravity conversation mirror & workspace dashboard",
+  "description": "Antigravity 实时对话镜像与工作区控制台",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#09090b",
