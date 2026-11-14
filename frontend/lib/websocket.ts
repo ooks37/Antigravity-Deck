@@ -172,6 +172,15 @@ export function useWebSocket() {
         const offSwapComplete = wsService.on('swap_complete', (data) => {
             console.log('[WS] swap_complete:', data.profile);
             // Don't clear swapping yet — wait for detected=true from detector
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('profile-swapped', { detail: { activeProfile: data.profile } }));
+            }
+        });
+
+        const offOAuthSwapped = wsService.on('oauth_account_swapped', (data) => {
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('oauth-account-swapped', { detail: data }));
+            }
         });
 
         const offStepsInit = wsService.on('steps_init', (data) => {
@@ -303,6 +312,7 @@ export function useWebSocket() {
             offClose();
             offStatus();
             offSwapComplete();
+            offOAuthSwapped();
             offStepsInit();
             offStepsNew();
             offStepUpdated();

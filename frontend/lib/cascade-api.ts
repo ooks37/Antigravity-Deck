@@ -389,7 +389,7 @@ export async function loadOlderSteps(
     return res.json();
 }
 
-// === Profile Swap ===
+// === Profile Swap & Cross-Platform OAuth Multi-Account ===
 export interface ProfileMeta {
     userName?: string | null;
     email?: string | null;
@@ -403,66 +403,140 @@ export interface ProfileEntry {
     meta: ProfileMeta | null;
 }
 
+export interface ProfileEnvironment {
+    platform: string;
+    ideSupported: boolean;
+    ideInstalled: boolean;
+    ideRunning: boolean;
+    headless: boolean;
+    profilesDir: string;
+    antigravityDataDir: string;
+}
+
+export interface OAuthAccountMeta {
+    alias: string;
+    source: string;
+    updatedAt: string;
+    email: string | null;
+    name: string | null;
+    expiry: string | null;
+    isExpired: boolean;
+    authMethod: string;
+    format: string;
+    hasRefreshToken: boolean;
+    hasAccessToken: boolean;
+    isActive: boolean;
+}
+
+export interface OAuthListResponse {
+    hasCurrentCreds: boolean;
+    activeEmail: string | null;
+    activeName: string | null;
+    expiry: string | null;
+    isExpired: boolean;
+    oauthCredsExists: boolean;
+    accountsDirExists: boolean;
+    activeAlias: string | null;
+    accounts: OAuthAccountMeta[];
+}
+
 export interface ProfileListResponse {
     profiles: ProfileEntry[];
     active: string | null;
+    environment?: ProfileEnvironment | null;
+    oauth?: OAuthListResponse | null;
+}
+
+async function apiJson<T>(url: string, init?: RequestInit, fallbackErr = '请求失败'): Promise<T> {
+    const res = await fetch(url, {
+        ...init,
+        headers: { ...authHeaders(), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers || {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `${fallbackErr}: ${res.status}`);
+    return data as T;
 }
 
 export async function getProfiles(): Promise<ProfileListResponse> {
-    const res = await fetch(`${API_BASE}/api/profiles`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(`Profiles failed: ${res.status}`);
-    return res.json();
+    return apiJson<ProfileListResponse>(`${API_BASE}/api/profiles`, undefined, '获取账号档案失败');
 }
 
-export async function swapProfile(target: string): Promise<{ success: boolean; previousProfile: string; activeProfile: string; relaunched: boolean }> {
-    const res = await fetch(`${API_BASE}/api/profiles/swap`, {
-        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+export async function swapProfile(target: string): Promise<{ success: boolean; platform?: string; previousProfile: string; activeProfile: string; relaunched: boolean }> {
+    return apiJson(`${API_BASE}/api/profiles/swap`, {
+        method: 'POST',
         body: JSON.stringify({ targetProfile: target }),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Swap failed: ${res.status}`); }
-    return res.json();
+    }, '切换档案失败');
 }
 
 export async function autoOnboardProfile(): Promise<{ created?: boolean; skipped?: boolean; message: string; autoName?: string; active?: string }> {
-    const res = await fetch(`${API_BASE}/api/profiles/auto-onboard`, {
-        method: 'POST', headers: authHeaders(),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Onboard failed: ${res.status}`); }
-    return res.json();
+    return apiJson(`${API_BASE}/api/profiles/auto-onboard`, { method: 'POST' }, '自动识别档案失败');
 }
 
 export async function createProfileEntry(name: string, force = false): Promise<{ created: boolean; copied: number; message: string; warning?: string }> {
-    const res = await fetch(`${API_BASE}/api/profiles/create`, {
-        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    return apiJson(`${API_BASE}/api/profiles/create`, {
+        method: 'POST',
         body: JSON.stringify({ name, force }),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Create failed: ${res.status}`); }
-    return res.json();
+    }, '创建档案失败');
+}
+
+export async function renameProfileEntry(name: string, newName: string): Promise<{ renamed: boolean; oldName: string; newName: string }> {
+    return apiJson(`${API_BASE}/api/profiles/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ newName }),
+    }, '重命名档案失败');
 }
 
 export async function deleteProfileEntry(name: string): Promise<{ deleted: boolean; message: string }> {
-    const res = await fetch(`${API_BASE}/api/profiles/${encodeURIComponent(name)}`, {
-        method: 'DELETE', headers: authHeaders(),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Delete failed: ${res.status}`); }
-    return res.json();
+    return apiJson(`${API_BASE}/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' }, '删除档案失败');
 }
 
 export async function startAddAccountFlow(): Promise<{ success: boolean; previousProfile: string; relaunched: boolean; message: string }> {
-    const res = await fetch(`${API_BASE}/api/profiles/add-account`, {
-        method: 'POST', headers: authHeaders(),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Start add failed: ${res.status}`); }
-    return res.json();
+    return apiJson(`${API_BASE}/api/profiles/add-account`, { method: 'POST' }, '启动新账号登录失败');
 }
 
 export async function cancelAddAccountFlow(previousProfile: string): Promise<{ success: boolean; activeProfile: string; relaunched: boolean }> {
-    const res = await fetch(`${API_BASE}/api/profiles/cancel-add`, {
-        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    return apiJson(`${API_BASE}/api/profiles/cancel-add`, {
+        method: 'POST',
         body: JSON.stringify({ previousProfile }),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Cancel add failed: ${res.status}`); }
-    return res.json();
+    }, '还原原档案失败');
+}
+
+export async function getOAuthAccounts(): Promise<OAuthListResponse> {
+    return apiJson(`${API_BASE}/api/accounts/oauth`, undefined, '获取 OAuth 账号列表失败');
+}
+
+export async function saveOAuthAccount(alias?: string, force = false): Promise<{ saved: boolean; alias: string; account: OAuthAccountMeta }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/save`, {
+        method: 'POST',
+        body: JSON.stringify({ alias: alias || '', force }),
+    }, '保存当前凭据失败');
+}
+
+export async function importOAuthAccount(payload: { alias?: string; credentialJson: string; force?: boolean; activate?: boolean }): Promise<{ imported: boolean; alias: string; activated: boolean; account: OAuthAccountMeta }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/import`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '导入 OAuth 凭据失败');
+}
+
+export async function useOAuthAccount(target: string): Promise<{ success: boolean; alias: string; email: string | null; name: string | null; oauthSynced: boolean; credManSynced: boolean }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/use`, {
+        method: 'POST',
+        body: JSON.stringify({ target }),
+    }, '切换 OAuth 账号失败');
+}
+
+export async function renameOAuthAccountEntry(alias: string, newAlias: string): Promise<{ renamed: boolean; oldAlias: string; newAlias: string }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/${encodeURIComponent(alias)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ newAlias }),
+    }, '重命名 OAuth 账号失败');
+}
+
+export async function deleteOAuthAccountEntry(alias: string): Promise<{ deleted: boolean; alias: string }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/${encodeURIComponent(alias)}`, {
+        method: 'DELETE',
+    }, '删除 OAuth 账号失败');
 }
 
 // === LS API Proxy ===

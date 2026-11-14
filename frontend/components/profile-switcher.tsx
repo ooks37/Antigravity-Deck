@@ -1,290 +1,1050 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Loader2, Trash2, ArrowLeftRight, UserCircle, Plus } from 'lucide-react';
-import { getProfiles, swapProfile, createProfileEntry, deleteProfileEntry, autoOnboardProfile, startAddAccountFlow, cancelAddAccountFlow, type ProfileEntry } from '@/lib/cascade-api';
-import { cn } from '@/lib/utils';
 
-export function ProfileSwitcher() {
+import { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+    ArrowLeftRight,
+    Check,
+    KeyRound,
+    Loader2,
+    Monitor,
+    Pencil,
+    Plus,
+    RefreshCw,
+    RotateCcw,
+    Save,
+    Server,
+    ShieldCheck,
+    Trash2,
+    Upload,
+    UserPlus,
+    Users,
+} from 'lucide-react';
+import {
+    autoOnboardProfile,
+    cancelAddAccountFlow,
+    createProfileEntry,
+    deleteOAuthAccountEntry,
+    deleteProfileEntry,
+    getProfiles,
+    importOAuthAccount,
+    renameOAuthAccountEntry,
+    renameProfileEntry,
+    saveOAuthAccount,
+    startAddAccountFlow,
+    swapProfile,
+    useOAuthAccount,
+    type OAuthAccountMeta,
+    type OAuthListResponse,
+    type ProfileEntry,
+    type ProfileEnvironment,
+} from '@/lib/cascade-api';
+
+interface ProfileSwitcherProps {
+    detected?: boolean;
+    onAccountChanged?: () => void;
+}
+
+type ConfirmAction =
+    | { kind: 'swap-ide'; target: string }
+    | { kind: 'delete-ide'; target: string }
+    | { kind: 'start-add-ide' }
+    | { kind: 'delete-oauth'; target: string; email?: string | null };
+
+type RenameModalState =
+    | { scope: 'oauth'; currentName: string; value: string }
+    | { scope: 'ide'; currentName: string; value: string };
+
+function formatPlatformLabel(env: ProfileEnvironment | null): string {
+    if (!env) return '跨平台';
+    const map: Record<string, string> = { win32: 'Windows', linux: 'Linux', darwin: 'macOS' };
+    const osName = map[env.platform] || env.platform;
+    return env.headless ? `${osName} 无头/VPS` : osName;
+}
+
+export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileSwitcherProps) {
     const [profiles, setProfiles] = useState<ProfileEntry[]>([]);
     const [active, setActive] = useState<string | null>(null);
-    const [swapping, setSwapping] = useState(false);
-    const [addingAccount, setAddingAccount] = useState(false); // step 1: enter name
-    const [awaitingLogin, setAwaitingLogin] = useState(false); // step 2: IDE open, waiting for login
-    const [previousProfile, setPreviousProfile] = useState<string | null>(null);
-    const [newName, setNewName] = useState('');
-    const [loading, setLoading] = useState(true);
-    const [onboarding, setOnboarding] = useState(false);
-    const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-    const onboardAttempted = useRef(false);
+    const [env, setEnv] = useState<ProfileEnvironment | null>(null);
+    const [oauth, setOAuth] = useState<OAuthListResponse | null>(null);
 
-    const loadProfiles = useCallback(async () => {
+    const [activeTab, setActiveTab] = useState<string>('oauth');
+    const [didPickDefaultTab, setDidPickDefaultTab] = useState(false);
+
+    const [loading, setLoading] = useState(true);
+    const [busyKey, setBusyKey] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [notice, setNotice] = useState<string | null>(null);
+
+    // IDE flow state
+    const [awaitingLogin, setAwaitingLogin] = useState(false);
+    const [prevProfile, setPrevProfile] = useState<string | null>(null);
+    const [showIdeSaveDialog, setShowIdeSaveDialog] = useState(false);
+    const [ideSaveName, setIdeSaveName] = useState('');
+    const [ideSaveForce, setIdeSaveForce] = useState(false);
+
+    // OAuth save / import dialogs
+    const [showOAuthSaveDialog, setShowOAuthSaveDialog] = useState(false);
+    const [oauthSaveAlias, setOAuthSaveAlias] = useState('');
+    const [oauthSaveForce, setOAuthSaveForce] = useState(false);
+
+    const [showImportDialog, setShowImportDialog] = useState(false);
+    const [importAlias, setImportAlias] = useState('');
+    const [importJson, setImportJson] = useState('');
+    const [importForce, setImportForce] = useState(false);
+    const [importActivate, setImportActivate] = useState(true);
+
+    // Unified rename & confirm modals
+    const [renameState, setRenameState] = useState<RenameModalState | null>(null);
+    const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+
+    const fetchAll = useCallback(async (quiet = false) => {
+        if (!quiet) setLoading(true);
         try {
             const data = await getProfiles();
-            setProfiles(data.profiles);
-            setActive(data.active);
-            return data;
-        } catch { /* ignore */ }
-        finally { setLoading(false); }
-        return null;
-    }, []);
+            setProfiles(data.profiles || []);
+            setActive(data.active || null);
+            setEnv(data.environment || null);
+            setOAuth(data.oauth || null);
+            setError(null);
 
-    // Auto-onboard: create default profile from IDE account when 0 profiles exist
+            if (!didPickDefaultTab) {
+                const hasOAuth = Boolean(data.oauth?.accounts?.length || data.oauth?.hasCurrentCreds);
+                const hasIde = Boolean(data.profiles?.length);
+                if (!detected || hasOAuth || !hasIde) {
+                    setActiveTab('oauth');
+                } else {
+                    setActiveTab('ide');
+                }
+                setDidPickDefaultTab(true);
+            }
+            return data;
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '读取账号列表失败');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    }, [detected, didPickDefaultTab]);
+
     const tryAutoOnboard = useCallback(async () => {
-        if (onboardAttempted.current) return;
-        onboardAttempted.current = true;
-        setOnboarding(true);
+        if (!detected) return;
         try {
-            const result = await autoOnboardProfile();
-            if (result.created) {
-                setStatus({ type: 'success', msg: `已自动保存账号档案 "${result.autoName}"` });
-                await loadProfiles();
+            const res = await autoOnboardProfile();
+            if (res.created) {
+                setNotice(`已自动识别并保存 IDE 档案 "${res.autoName}"`);
+                await fetchAll(true);
             }
         } catch {
-            // IDE not running or not logged in — silently skip, user will see empty state with action button
-        } finally { setOnboarding(false); }
-    }, [loadProfiles]);
+            // ignore silently on auto-onboard
+        }
+    }, [detected, fetchAll]);
 
     useEffect(() => {
-        loadProfiles().then(data => {
-            // Auto-onboard when: no profiles, OR in "adding" state (profiles exist but no active)
-            if (data && (data.profiles.length === 0 || !data.active)) tryAutoOnboard();
-        });
-    }, [loadProfiles, tryAutoOnboard]);
-
-    useEffect(() => {
-        if (!status) return;
-        const t = setTimeout(() => setStatus(null), 5000);
-        return () => clearTimeout(t);
-    }, [status]);
-
-    const handleSwap = async (target: string) => {
-        if (swapping || target === active) return;
-        if (!confirm(`确定切换到 "${target}"？这会关闭并重启 Antigravity IDE（约 10 秒）。`)) return;
-        setSwapping(true);
-        setStatus(null);
-        try {
-            const result = await swapProfile(target);
-            setActive(result.activeProfile);
-            setStatus({ type: 'success', msg: `已切换至 ${target}` });
-            loadProfiles();
-            // Notify other components to refresh account data
-            window.dispatchEvent(new CustomEvent('profile-swapped', { detail: result }));
-        } catch (e: any) {
-            setStatus({ type: 'error', msg: e.message });
-        } finally { setSwapping(false); }
-    };
-
-    // Start "Add New Account" — close IDE, launch fresh
-    const handleStartAddAccount = async () => {
-        if (!confirm('此操作将关闭当前 Antigravity IDE 并以空白登录状态重启，是否继续？')) return;
-        setSwapping(true);
-        setStatus(null);
-        try {
-            const result = await startAddAccountFlow();
-            setPreviousProfile(result.previousProfile);
-            setAwaitingLogin(true);
-            setAddingAccount(false);
-            setStatus({ type: 'success', msg: result.message });
-        } catch (e: any) {
-            setStatus({ type: 'error', msg: e.message });
-        } finally { setSwapping(false); }
-    };
-
-    // Save new account after user logged in
-    const handleSaveNewAccount = async (force = false) => {
-        const name = newName.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
-        if (!name) return;
-        try {
-            const result = await createProfileEntry(name, force);
-            setNewName('');
-            setAwaitingLogin(false);
-            setAddingAccount(false);
-            loadProfiles();
-            setStatus({ type: 'success', msg: `账号档案已保存为 "${name}"` });
-        } catch (e: any) {
-            if (e.message.includes('already saved as profile')) {
-                if (confirm(`${e.message}\n\n仍要覆盖保存吗？`)) return handleSaveNewAccount(true);
-                return;
+        let cancelled = false;
+        fetchAll().then((data) => {
+            if (!cancelled && detected && data && (data.profiles.length === 0 || !data.active)) {
+                tryAutoOnboard();
             }
-            setStatus({ type: 'error', msg: e.message });
+        });
+        return () => { cancelled = true; };
+    }, [fetchAll, detected, tryAutoOnboard]);
+
+    useEffect(() => {
+        const reload = () => { fetchAll(true); };
+        window.addEventListener('oauth-account-swapped', reload);
+        window.addEventListener('profile-swapped', reload);
+        return () => {
+            window.removeEventListener('oauth-account-swapped', reload);
+            window.removeEventListener('profile-swapped', reload);
+        };
+    }, [fetchAll]);
+
+    const notifyChange = useCallback((eventName: 'oauth-account-swapped' | 'profile-swapped', detail?: unknown) => {
+        window.dispatchEvent(new CustomEvent(eventName, { detail }));
+        onAccountChanged?.();
+    }, [onAccountChanged]);
+
+    // === OAuth Pool Handlers ===
+    const handleUseOAuth = async (acc: OAuthAccountMeta) => {
+        if (busyKey || acc.isActive) return;
+        setBusyKey(`oauth-use:${acc.alias}`);
+        setError(null);
+        setNotice(null);
+        try {
+            const res = await useOAuthAccount(acc.alias);
+            setNotice(`已毫秒级切换 OAuth 账号至「${res.alias}」${res.email ? ` (${res.email})` : ''}${res.credManSynced ? ' · 已同步系统凭据' : ''}`);
+            await fetchAll(true);
+            notifyChange('oauth-account-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '切换 OAuth 账号失败');
+        } finally {
+            setBusyKey(null);
         }
     };
 
-    // Cancel add account — restore previous profile
-    const handleCancelAdd = async () => {
-        if (!previousProfile) { setAwaitingLogin(false); setAddingAccount(false); return; }
-        setSwapping(true);
+    const handleSaveCurrentOAuth = async () => {
+        setBusyKey('oauth-save');
+        setError(null);
         try {
-            await cancelAddAccountFlow(previousProfile);
+            const res = await saveOAuthAccount(oauthSaveAlias.trim(), oauthSaveForce);
+            setNotice(`已保存当前活跃凭据为「${res.alias}」`);
+            setShowOAuthSaveDialog(false);
+            setOAuthSaveAlias('');
+            setOAuthSaveForce(false);
+            await fetchAll(true);
+            notifyChange('oauth-account-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '保存当前 OAuth 凭据失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const handleImportOAuth = async () => {
+        if (!importJson.trim()) {
+            setError('请粘贴 OAuth 凭据 JSON 内容');
+            return;
+        }
+        setBusyKey('oauth-import');
+        setError(null);
+        try {
+            const res = await importOAuthAccount({
+                alias: importAlias.trim() || undefined,
+                credentialJson: importJson.trim(),
+                force: importForce,
+                activate: importActivate,
+            });
+            setNotice(
+                res.activated
+                    ? `已导入并激活账号「${res.alias}」${res.account?.email ? ` (${res.account.email})` : ''}`
+                    : `已成功导入账号「${res.alias}」`,
+            );
+            setShowImportDialog(false);
+            setImportAlias('');
+            setImportJson('');
+            setImportForce(false);
+            await fetchAll(true);
+            notifyChange('oauth-account-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '导入 OAuth 凭据失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    // === IDE Profile Handlers ===
+    const executeSwapIde = async (target: string) => {
+        setBusyKey(`ide-swap:${target}`);
+        setError(null);
+        setNotice(null);
+        try {
+            const res = await swapProfile(target);
+            setActive(res.activeProfile);
             setAwaitingLogin(false);
-            setAddingAccount(false);
-            setPreviousProfile(null);
-            loadProfiles();
-            setStatus({ type: 'success', msg: '已恢复之前的账号档案' });
-        } catch (e: any) {
-            setStatus({ type: 'error', msg: e.message });
-        } finally { setSwapping(false); }
-    };
-
-    const handleDelete = async (name: string) => {
-        if (!confirm(`确定删除账号档案 "${name}"？该账号保存的所有本地登录状态将被移除。`)) return;
-        try {
-            await deleteProfileEntry(name);
-            loadProfiles();
-            setStatus({ type: 'success', msg: `已删除账号档案 "${name}"` });
-        } catch (e: any) {
-            setStatus({ type: 'error', msg: e.message });
+            setPrevProfile(null);
+            setNotice(
+                res.relaunched
+                    ? `已切换 IDE 档案至 "${res.activeProfile}"，正在重新启动 IDE（约 10 秒）...`
+                    : `已切换档案目录至 "${res.activeProfile}"（未运行桌面 IDE，配置已就绪）`,
+            );
+            await fetchAll(true);
+            notifyChange('profile-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '切换 IDE 档案失败');
+        } finally {
+            setBusyKey(null);
         }
     };
 
-    if (loading) return null;
+    const handleSaveIdeProfile = async () => {
+        const clean = ideSaveName.trim();
+        if (!clean) return;
+        setBusyKey('ide-create');
+        setError(null);
+        try {
+            await createProfileEntry(clean, ideSaveForce);
+            setActive(clean);
+            setAwaitingLogin(false);
+            setPrevProfile(null);
+            setShowIdeSaveDialog(false);
+            setIdeSaveName('');
+            setIdeSaveForce(false);
+            setNotice(`已保存当前 IDE 数据为档案 "${clean}"`);
+            await fetchAll(true);
+            notifyChange('profile-swapped', { activeProfile: clean });
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '保存 IDE 档案失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
 
-    const activeProfile = profiles.find(p => p.name === active);
-    const otherProfiles = profiles.filter(p => p.name !== active);
+    const handleCancelAddIde = async () => {
+        if (!prevProfile) return;
+        setBusyKey('ide-cancel-add');
+        setError(null);
+        try {
+            const res = await cancelAddAccountFlow(prevProfile);
+            setActive(res.activeProfile);
+            setAwaitingLogin(false);
+            setPrevProfile(null);
+            setNotice(`已还原原档案 "${res.activeProfile}"`);
+            await fetchAll(true);
+            notifyChange('profile-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '还原档案失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const handleRenameSubmit = async () => {
+        if (!renameState) return;
+        const targetNew = renameState.value.trim();
+        if (!targetNew || targetNew === renameState.currentName) return;
+        setBusyKey('rename');
+        setError(null);
+        try {
+            if (renameState.scope === 'oauth') {
+                await renameOAuthAccountEntry(renameState.currentName, targetNew);
+                setNotice(`已将 OAuth 账号「${renameState.currentName}」重命名为「${targetNew}」`);
+                notifyChange('oauth-account-swapped');
+            } else {
+                await renameProfileEntry(renameState.currentName, targetNew);
+                setNotice(`已将 IDE 档案 "${renameState.currentName}" 重命名为 "${targetNew}"`);
+                notifyChange('profile-swapped');
+            }
+            setRenameState(null);
+            await fetchAll(true);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '重命名失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const handleConfirmExecute = async () => {
+        if (!confirmAction) return;
+        const action = confirmAction;
+        setConfirmAction(null);
+
+        if (action.kind === 'swap-ide') {
+            await executeSwapIde(action.target);
+            return;
+        }
+
+        if (action.kind === 'start-add-ide') {
+            setBusyKey('ide-add-account');
+            setError(null);
+            try {
+                const res = await startAddAccountFlow();
+                setPrevProfile(res.previousProfile);
+                setAwaitingLogin(true);
+                setActive(null);
+                setNotice(res.message);
+                await fetchAll(true);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : '启动新账号登录失败');
+            } finally {
+                setBusyKey(null);
+            }
+            return;
+        }
+
+        if (action.kind === 'delete-ide') {
+            setBusyKey(`ide-del:${action.target}`);
+            setError(null);
+            try {
+                await deleteProfileEntry(action.target);
+                setNotice(`已删除 IDE 档案 "${action.target}"`);
+                await fetchAll(true);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : '删除 IDE 档案失败');
+            } finally {
+                setBusyKey(null);
+            }
+            return;
+        }
+
+        if (action.kind === 'delete-oauth') {
+            setBusyKey(`oauth-del:${action.target}`);
+            setError(null);
+            try {
+                await deleteOAuthAccountEntry(action.target);
+                setNotice(`已从账号池移除「${action.target}」`);
+                await fetchAll(true);
+                notifyChange('oauth-account-swapped');
+            } catch (err) {
+                setError(err instanceof Error ? err.message : '删除 OAuth 账号失败');
+            } finally {
+                setBusyKey(null);
+            }
+        }
+    };
+
+    const activeProfile = profiles.find((p) => p.name === active);
+    const otherProfiles = profiles.filter((p) => p.name !== active);
+    const oauthAccounts = oauth?.accounts || [];
+    const activeOAuthAccount = oauthAccounts.find((a) => a.isActive) || null;
+
+    if (loading) {
+        return (
+            <Card className="border-border/50">
+                <CardContent className="p-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在加载多用户账号配置...
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
-        <div>
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <UserCircle className="h-3 w-3" /> 多账号切换
-                </h3>
-                {/* Add Account button */}
-            {!addingAccount && !awaitingLogin && !swapping && (
-                    <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={handleStartAddAccount}>
-                        <Plus className="h-3 w-3 mr-1" /> 添加账号
-                    </Button>
-                )}
-            </div>
-
-            {/* Onboarding in progress */}
-            {onboarding && (
-                <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 mb-3">
-                    <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
-                    <span className="text-xs text-indigo-400 font-medium">正在识别 IDE 当前登录账号...</span>
-                </div>
-            )}
-
-            {/* Empty state — no profiles saved yet */}
-            {profiles.length === 0 && !onboarding && (
-                <div className="mb-3">
-                    <p className="text-xs text-muted-foreground mb-2">
-                        尚未保存任何账号档案。保存当前 IDE 账号后即可随时在多个 Google 账号之间无缝切换（当前仅支持 Windows）。
-                    </p>
-                    {!addingAccount && (
-                        <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => setAddingAccount(true)}>
-                            <Plus className="h-3 w-3 mr-1" /> 保存当前账号
-                        </Button>
-                    )}
-                </div>
-            )}
-
-            {/* Swap in progress */}
-            {swapping && (
-                <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 mb-3">
-                    <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
-                    <span className="text-xs text-amber-400 font-medium">正在切换账号并重启 IDE（约需 10 秒）...</span>
-                </div>
-            )}
-
-            {/* Status toast */}
-            {status && (
-                <div className={cn(
-                    "px-3 py-2 rounded-lg border mb-3 text-xs font-medium",
-                    status.type === 'success' ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-red-500/30 bg-red-500/10 text-red-400"
-                )}>{status.msg}</div>
-            )}
-
-            {/* Active profile */}
-            {activeProfile && (
-                <div className="px-3 py-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 mb-2">
-                    <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-medium">{activeProfile.meta?.userName || activeProfile.name}</span>
-                                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[9px] h-4 px-1.5">当前使用</Badge>
-                                {activeProfile.meta?.tier && (
-                                    <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-indigo-500/30 text-indigo-400">{activeProfile.meta.tier}</Badge>
-                                )}
+        <>
+            <Card className="border-border/50 overflow-hidden">
+                <CardHeader className="pb-3 border-b border-border/40 bg-muted/10">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center">
+                                <Users className="h-4 w-4 text-indigo-400" />
                             </div>
-                            {activeProfile.meta?.email && (
-                                <p className="text-[10px] text-muted-foreground truncate mt-0.5">{activeProfile.meta.email}</p>
+                            <div>
+                                <CardTitle className="text-sm font-semibold">多用户账号切换中心</CardTitle>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                    支持 Linux VPS / macOS / Windows 跨平台无缝切换 Google 账号
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge variant="outline" className="text-[10px] h-5 px-2 gap-1 font-normal border-border/60">
+                                {env?.headless ? <Server className="h-3 w-3 text-emerald-400" /> : <Monitor className="h-3 w-3 text-sky-400" />}
+                                {formatPlatformLabel(env)}
+                            </Badge>
+                            {env && (
+                                <Badge
+                                    variant="outline"
+                                    className={`text-[10px] h-5 px-2 font-normal ${
+                                        env.ideRunning
+                                            ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10'
+                                            : 'border-border/60 text-muted-foreground'
+                                    }`}
+                                >
+                                    {env.ideRunning ? '桌面 IDE 运行中' : 'IDE 未运行'}
+                                </Badge>
                             )}
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => fetchAll(true)}
+                                disabled={busyKey !== null}
+                                title="刷新账号状态"
+                            >
+                                <RefreshCw className={`h-3.5 w-3.5 ${busyKey ? 'animate-spin' : ''}`} />
+                            </Button>
                         </div>
                     </div>
-                </div>
-            )}
+                </CardHeader>
 
-            {/* Other profiles — swap targets */}
-            {otherProfiles.map(p => (
-                <div key={p.name} className="flex items-center justify-between px-3 py-2 rounded-lg border border-border/40 bg-muted/10 mb-1.5">
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-medium truncate">{p.meta?.userName || p.name}</span>
-                            {p.meta?.tier && (
-                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-muted-foreground/30 text-muted-foreground">{p.meta.tier}</Badge>
-                            )}
+                <CardContent className="p-4 space-y-4">
+                    {/* Feedback banners */}
+                    {error && (
+                        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 flex items-center justify-between gap-2">
+                            <span>{error}</span>
+                            <button onClick={() => setError(null)} className="text-red-300/70 hover:text-red-200 text-xs">✕</button>
                         </div>
-                        {p.meta?.email && (
-                            <p className="text-[10px] text-muted-foreground truncate">{p.meta.email}</p>
-                        )}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0 ml-2">
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => handleSwap(p.name)} disabled={swapping}>
-                            <ArrowLeftRight className="h-3 w-3 mr-1" /> 切换
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-400" onClick={() => handleDelete(p.name)} disabled={swapping}>
-                            <Trash2 className="h-3 w-3" />
-                        </Button>
-                    </div>
-                </div>
-            ))}
+                    )}
+                    {notice && (
+                        <div className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-md px-3 py-2 flex items-center justify-between gap-2">
+                            <span>{notice}</span>
+                            <button onClick={() => setNotice(null)} className="text-emerald-300/70 hover:text-emerald-200 text-xs">✕</button>
+                        </div>
+                    )}
 
-            {/* No active profile — in "adding" state, show save prompt */}
-            {!active && profiles.length > 0 && !awaitingLogin && !onboarding && (
-                <div className="mt-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
-                    <p className="text-xs text-amber-400 font-medium mb-2">
-                        🔑 检测到未归档的新账号，请命名并保存以启用快速切换：
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <Input
-                            value={newName} onChange={e => setNewName(e.target.value)}
-                            placeholder="档案别名（仅限英文/数字，如 work, personal）"
-                            className="h-7 text-xs flex-1" autoFocus
-                            onKeyDown={e => { if (e.key === 'Enter') handleSaveNewAccount(); }}
-                        />
-                        <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => handleSaveNewAccount()} disabled={!newName.trim() || swapping}>
-                            保存
-                        </Button>
-                    </div>
-                </div>
-            )}
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                        <TabsList className="w-full grid grid-cols-2 h-9">
+                            <TabsTrigger value="oauth" className="text-xs gap-1.5">
+                                <KeyRound className="h-3.5 w-3.5" />
+                                <span>OAuth 账号池（0秒热切）</span>
+                                <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{oauthAccounts.length}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="ide" className="text-xs gap-1.5">
+                                <ArrowLeftRight className="h-3.5 w-3.5" />
+                                <span>IDE 目录档案（完整隔离）</span>
+                                <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{profiles.length}</Badge>
+                            </TabsTrigger>
+                        </TabsList>
 
-            {/* Awaiting Login — IDE is open fresh, user needs to login then save */}
-            {awaitingLogin && (
-                <div className="mt-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
-                    <p className="text-xs text-amber-400 font-medium mb-2">
-                        🔑 请在重启后的 Antigravity IDE 中登录新的 Google 账号，然后在下方保存：
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <Input
-                            value={newName} onChange={e => setNewName(e.target.value)}
-                            placeholder="档案别名（仅限英文/数字，如 work, personal）"
-                            className="h-7 text-xs flex-1" autoFocus
-                            onKeyDown={e => { if (e.key === 'Enter') handleSaveNewAccount(); if (e.key === 'Escape') handleCancelAdd(); }}
-                        />
-                        <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => handleSaveNewAccount()} disabled={!newName.trim() || swapping}>
-                            保存
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-7 text-[10px] text-muted-foreground" onClick={handleCancelAdd} disabled={swapping}>
-                            取消
-                        </Button>
+                        {/* === Tab 1: OAuth Pool (agy CLI + VPS headless compatible) === */}
+                        <TabsContent value="oauth" className="space-y-3 pt-3">
+                            {/* Toolbar + current oauth status */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-muted/15 border border-border/40">
+                                <div className="min-w-0 space-y-0.5">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-[11px] font-medium text-muted-foreground">当前 OAuth 凭据:</span>
+                                        {oauth?.activeEmail ? (
+                                            <span className="text-xs font-semibold text-foreground truncate">{oauth.activeEmail}</span>
+                                        ) : oauth?.hasCurrentCreds ? (
+                                            <span className="text-xs font-medium text-foreground">已检测到本地凭据</span>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground">暂无活跃凭据</span>
+                                        )}
+                                        {activeOAuthAccount && (
+                                            <Badge className="text-[10px] h-4 px-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20">
+                                                {activeOAuthAccount.alias}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground">
+                                        直接读写 <code className="text-[10px] bg-muted/50 px-1 py-0.5 rounded">~/.gemini/oauth_creds.json</code> 与 <code className="text-[10px] bg-muted/50 px-1 py-0.5 rounded">accounts/*.json</code>（无需重启、兼容 <code className="text-[10px]">agy</code> 与 Linux VPS）
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs gap-1"
+                                        disabled={busyKey !== null || !oauth?.hasCurrentCreds}
+                                        onClick={() => {
+                                            setOAuthSaveAlias('');
+                                            setOAuthSaveForce(false);
+                                            setShowOAuthSaveDialog(true);
+                                        }}
+                                        title={oauth?.hasCurrentCreds ? '将当前 oauth_creds.json / 系统凭据另存为账号' : '当前无活跃凭据'}
+                                    >
+                                        <Save className="h-3 w-3" />
+                                        保存当前凭据
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        className="h-7 text-xs gap-1"
+                                        disabled={busyKey !== null}
+                                        onClick={() => {
+                                            setImportAlias('');
+                                            setImportJson('');
+                                            setImportForce(false);
+                                            setImportActivate(true);
+                                            setShowImportDialog(true);
+                                        }}
+                                    >
+                                        <Upload className="h-3 w-3" />
+                                        导入 JSON
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {oauthAccounts.length === 0 ? (
+                                <div className="p-5 rounded-lg bg-muted/10 border border-dashed border-border/50 text-center space-y-2.5">
+                                    <KeyRound className="h-7 w-7 mx-auto text-muted-foreground/60" />
+                                    <div className="space-y-1">
+                                        <p className="text-xs font-medium text-foreground">OAuth 账号池暂无已保存账号</p>
+                                        <p className="text-[11px] text-muted-foreground max-w-md mx-auto">
+                                            可将其他机器导出的 <code className="text-[10px]">oauth_creds.json</code> 或 <code className="text-[10px]">agy</code> 账号 JSON 导入此处，随时零延迟秒切。
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center justify-center gap-2 pt-1">
+                                        {oauth?.hasCurrentCreds && (
+                                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowOAuthSaveDialog(true)}>
+                                                <Save className="h-3 w-3" /> 保存当前账号
+                                            </Button>
+                                        )}
+                                        <Button size="sm" className="h-7 text-xs gap-1" onClick={() => setShowImportDialog(true)}>
+                                            <Upload className="h-3 w-3" /> 导入凭据 JSON
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-2">
+                                    {oauthAccounts.map((acc) => {
+                                        const isSwitchingThis = busyKey === `oauth-use:${acc.alias}`;
+                                        const initial = (acc.email || acc.alias || '?')[0].toUpperCase();
+                                        return (
+                                            <div
+                                                key={acc.alias}
+                                                className={`flex items-center justify-between gap-3 p-3 rounded-lg border transition-colors ${
+                                                    acc.isActive
+                                                        ? 'bg-emerald-500/8 border-emerald-500/35'
+                                                        : 'bg-muted/15 border-border/40 hover:border-border/70'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div
+                                                        className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                                                            acc.isActive
+                                                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                                                : 'bg-muted text-muted-foreground'
+                                                        }`}
+                                                    >
+                                                        {initial}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span className="text-xs font-semibold truncate">{acc.alias}</span>
+                                                            {acc.isActive && (
+                                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-emerald-500/40 text-emerald-400 gap-0.5">
+                                                                    <ShieldCheck className="h-2.5 w-2.5" /> 当前使用中
+                                                                </Badge>
+                                                            )}
+                                                            <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-normal">
+                                                                {acc.format === 'agy-cred' ? 'agy 凭据' : 'OAuth JSON'}
+                                                            </Badge>
+                                                            {acc.isExpired && (
+                                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-amber-500/30 text-amber-400">
+                                                                    {acc.hasRefreshToken ? '访问令牌过期（可自动续期）' : '已过期'}
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                                                            {acc.email || '未包含邮箱声明'}
+                                                            {acc.name && acc.email && !acc.email.startsWith(acc.name) ? ` · ${acc.name}` : ''}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-1 flex-shrink-0">
+                                                    {!acc.isActive ? (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="h-7 px-2.5 text-xs gap-1"
+                                                            disabled={busyKey !== null}
+                                                            onClick={() => handleUseOAuth(acc)}
+                                                        >
+                                                            {isSwitchingThis ? (
+                                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                                            ) : (
+                                                                <ArrowLeftRight className="h-3 w-3" />
+                                                            )}
+                                                            切换使用
+                                                        </Button>
+                                                    ) : (
+                                                        <span className="text-[11px] text-emerald-400 px-2 hidden sm:inline-flex items-center gap-1">
+                                                            <Check className="h-3.5 w-3.5" /> 已启用
+                                                        </span>
+                                                    )}
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                                        disabled={busyKey !== null}
+                                                        title="重命名别名"
+                                                        onClick={() => setRenameState({ scope: 'oauth', currentName: acc.alias, value: acc.alias })}
+                                                    >
+                                                        <Pencil className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                                        disabled={busyKey !== null}
+                                                        title="从账号池删除"
+                                                        onClick={() => setConfirmAction({ kind: 'delete-oauth', target: acc.alias, email: acc.email })}
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </TabsContent>
+
+                        {/* === Tab 2: Cross-Platform IDE Folder Profiles === */}
+                        <TabsContent value="ide" className="space-y-3 pt-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-[11px] text-muted-foreground">
+                                    隔离切换 <code className="text-[10px]">Antigravity</code> / <code className="text-[10px]">.gemini</code> / <code className="text-[10px]">.antigravity</code> 目录。
+                                    {env?.headless ? '（当前无桌面 GUI，切换将直接更新配置目录）' : '（切换运行中档案将安全重启 IDE）'}
+                                </p>
+                                <div className="flex items-center gap-1.5">
+                                    {active && !awaitingLogin && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs gap-1"
+                                            disabled={busyKey !== null}
+                                            onClick={() => setConfirmAction({ kind: 'start-add-ide' })}
+                                        >
+                                            <UserPlus className="h-3 w-3" /> 添加新 Google 账号
+                                        </Button>
+                                    )}
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs gap-1"
+                                        disabled={busyKey !== null}
+                                        onClick={() => {
+                                            setIdeSaveName('');
+                                            setIdeSaveForce(false);
+                                            setShowIdeSaveDialog(true);
+                                        }}
+                                    >
+                                        <Plus className="h-3 w-3" /> 保存当前为新档案
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {profiles.length === 0 && !awaitingLogin && (
+                                <div className="p-5 rounded-lg bg-muted/10 border border-dashed border-border/50 text-center space-y-2">
+                                    <p className="text-xs text-muted-foreground">
+                                        尚未保存任何 IDE 目录档案。保存当前登录状态后，可随时在不同完整工作区账号之间切换。
+                                    </p>
+                                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowIdeSaveDialog(true)}>
+                                        <Plus className="h-3 w-3" /> 保存当前账号档案
+                                    </Button>
+                                </div>
+                            )}
+
+                            {awaitingLogin && (
+                                <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 space-y-2.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-xs font-medium text-blue-400">正在等待新账号登录</div>
+                                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                                                请在 Antigravity IDE 中完成 Google 登录（或先在无头环境中写入登录凭据），然后点击“保存为新档案”。
+                                            </p>
+                                        </div>
+                                        {prevProfile && (
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-7 text-xs gap-1 text-muted-foreground"
+                                                disabled={busyKey !== null}
+                                                onClick={handleCancelAddIde}
+                                            >
+                                                <RotateCcw className="h-3 w-3" /> 取消并还原
+                                            </Button>
+                                        )}
+                                    </div>
+                                    <Button size="sm" className="h-7 text-xs gap-1" onClick={() => setShowIdeSaveDialog(true)}>
+                                        <Plus className="h-3 w-3" /> 保存当前登录为新档案
+                                    </Button>
+                                </div>
+                            )}
+
+                            {!active && profiles.length > 0 && !awaitingLogin && (
+                                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-xs text-amber-300">
+                                        当前未绑定活跃档案（可能刚添加新账号尚未保存）。
+                                    </div>
+                                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowIdeSaveDialog(true)}>
+                                        <Plus className="h-3 w-3" /> 保存当前账号
+                                    </Button>
+                                </div>
+                            )}
+
+                            {activeProfile && (
+                                <div className="flex items-center justify-between gap-2 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/30">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                                            <span className="text-xs font-semibold">{activeProfile.name}</span>
+                                            {activeProfile.meta?.userName && (
+                                                <span className="text-[11px] text-muted-foreground">({activeProfile.meta.userName})</span>
+                                            )}
+                                            {activeProfile.meta?.tier && (
+                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-indigo-500/30 text-indigo-400">
+                                                    {activeProfile.meta.tier}
+                                                </Badge>
+                                            )}
+                                            <Badge variant="secondary" className="text-[9px] h-4 px-1.5">当前档案</Badge>
+                                        </div>
+                                        {activeProfile.meta?.email && (
+                                            <p className="text-[11px] text-muted-foreground truncate mt-0.5 pl-4">{activeProfile.meta.email}</p>
+                                        )}
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                        disabled={busyKey !== null}
+                                        title="重命名当前档案"
+                                        onClick={() => setRenameState({ scope: 'ide', currentName: activeProfile.name, value: activeProfile.name })}
+                                    >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                </div>
+                            )}
+
+                            {otherProfiles.length > 0 && (
+                                <div className="space-y-1.5">
+                                    {otherProfiles.map((p) => (
+                                        <div key={p.name} className="flex items-center justify-between gap-2 p-3 rounded-lg bg-muted/15 border border-border/40">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-xs font-medium">{p.name}</span>
+                                                    {p.meta?.userName && (
+                                                        <span className="text-[11px] text-muted-foreground">({p.meta.userName})</span>
+                                                    )}
+                                                    {p.meta?.tier && (
+                                                        <Badge variant="outline" className="text-[9px] h-4 px-1.5">{p.meta.tier}</Badge>
+                                                    )}
+                                                </div>
+                                                {p.meta?.email && (
+                                                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">{p.meta.email}</p>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-1 flex-shrink-0">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-7 px-2.5 text-xs gap-1"
+                                                    disabled={busyKey !== null || !active}
+                                                    title={!active ? '请先保存当前登录账号后再切换' : `切换至 ${p.name}`}
+                                                    onClick={() => setConfirmAction({ kind: 'swap-ide', target: p.name })}
+                                                >
+                                                    {busyKey === `ide-swap:${p.name}` ? (
+                                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                        <ArrowLeftRight className="h-3 w-3" />
+                                                    )}
+                                                    切换档案
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                                    disabled={busyKey !== null}
+                                                    title="重命名"
+                                                    onClick={() => setRenameState({ scope: 'ide', currentName: p.name, value: p.name })}
+                                                >
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                                    disabled={busyKey !== null}
+                                                    title="删除档案"
+                                                    onClick={() => setConfirmAction({ kind: 'delete-ide', target: p.name })}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </TabsContent>
+                    </Tabs>
+                </CardContent>
+            </Card>
+
+            {/* Save Current OAuth Account Dialog */}
+            <Dialog open={showOAuthSaveDialog} onOpenChange={(open) => { setShowOAuthSaveDialog(open); }}>
+                <DialogContent className="sm:max-w-[420px]">
+                    <DialogHeader>
+                        <DialogTitle>保存当前 OAuth 凭据</DialogTitle>
+                        <DialogDescription>
+                            将当前活跃的 <code className="text-[11px]">oauth_creds.json</code> / 系统凭据保存到 <code className="text-[11px]">~/.gemini/accounts/</code> 账号池。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-1">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-muted-foreground">账号别名（留空则自动根据邮箱生成）</label>
+                            <Input
+                                value={oauthSaveAlias}
+                                onChange={(e) => setOAuthSaveAlias(e.target.value)}
+                                placeholder="例如：主账号、work、personal"
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCurrentOAuth(); }}
+                                autoFocus
+                            />
+                        </div>
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                            <Checkbox checked={oauthSaveForce} onCheckedChange={(v) => setOAuthSaveForce(v === true)} />
+                            <span>若同名或同邮箱已存在，强制覆盖保存</span>
+                        </label>
                     </div>
-                </div>
-            )}
-        </div>
+                    <DialogFooter>
+                        <Button variant="ghost" size="sm" onClick={() => setShowOAuthSaveDialog(false)}>取消</Button>
+                        <Button size="sm" onClick={handleSaveCurrentOAuth} disabled={busyKey === 'oauth-save'}>
+                            {busyKey === 'oauth-save' && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                            保存至账号池
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Import OAuth JSON Dialog */}
+            <Dialog
+                open={showImportDialog}
+                onOpenChange={(open) => {
+                    setShowImportDialog(open);
+                    if (!open) setImportJson('');
+                }}
+            >
+                <DialogContent className="sm:max-w-[500px]">
+                    <DialogHeader>
+                        <DialogTitle>导入 OAuth 凭据 JSON</DialogTitle>
+                        <DialogDescription>
+                            支持 <code className="text-[11px]">~/.gemini/oauth_creds.json</code> 或 <code className="text-[11px]">~/.gemini/accounts/*.json</code> 导出的凭据内容（仅存储于本机目录，绝不回传令牌原文）。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-1">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-muted-foreground">账号别名（选填，支持中英文、数字、_-）</label>
+                            <Input
+                                value={importAlias}
+                                onChange={(e) => setImportAlias(e.target.value)}
+                                placeholder="留空将自动从邮箱提取别名"
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-muted-foreground">凭据 JSON 内容</label>
+                            <Textarea
+                                value={importJson}
+                                onChange={(e) => setImportJson(e.target.value)}
+                                placeholder={'{\n  "access_token": "...",\n  "refresh_token": "...",\n  "id_token": "..."\n}'}
+                                className="font-mono text-xs min-h-32 max-h-56"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                                <Checkbox checked={importActivate} onCheckedChange={(v) => setImportActivate(v === true)} />
+                                <span>导入后立即设为当前活跃账号</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                                <Checkbox checked={importForce} onCheckedChange={(v) => setImportForce(v === true)} />
+                                <span>若别名或同邮箱已存在，强制覆盖保存</span>
+                            </label>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" size="sm" onClick={() => { setShowImportDialog(false); setImportJson(''); }}>取消</Button>
+                        <Button size="sm" onClick={handleImportOAuth} disabled={busyKey === 'oauth-import' || !importJson.trim()}>
+                            {busyKey === 'oauth-import' && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                            导入账号
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Save IDE Profile Dialog */}
+            <Dialog open={showIdeSaveDialog} onOpenChange={setShowIdeSaveDialog}>
+                <DialogContent className="sm:max-w-[420px]">
+                    <DialogHeader>
+                        <DialogTitle>保存当前 IDE 账号档案</DialogTitle>
+                        <DialogDescription>
+                            档案名仅支持英文字母、数字、连字符和下划线（例如 work、personal、account-2）。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-1">
+                        <Input
+                            value={ideSaveName}
+                            onChange={(e) => setIdeSaveName(e.target.value)}
+                            placeholder="work-account"
+                            onKeyDown={(e) => { if (e.key === 'Enter' && ideSaveName.trim()) handleSaveIdeProfile(); }}
+                            autoFocus
+                        />
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                            <Checkbox checked={ideSaveForce} onCheckedChange={(v) => setIdeSaveForce(v === true)} />
+                            <span>若同一邮箱已存在档案，允许强制保存副本</span>
+                        </label>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" size="sm" onClick={() => setShowIdeSaveDialog(false)}>取消</Button>
+                        <Button size="sm" onClick={handleSaveIdeProfile} disabled={busyKey === 'ide-create' || !ideSaveName.trim()}>
+                            {busyKey === 'ide-create' && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                            确认保存
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Unified Rename Dialog */}
+            <Dialog open={renameState !== null} onOpenChange={(open) => { if (!open) setRenameState(null); }}>
+                <DialogContent className="sm:max-w-[400px]">
+                    <DialogHeader>
+                        <DialogTitle>重命名{renameState?.scope === 'oauth' ? ' OAuth 账号' : ' IDE 档案'}</DialogTitle>
+                        <DialogDescription>
+                            {renameState?.scope === 'oauth'
+                                ? '支持中英文、数字、下划线和连字符。'
+                                : 'IDE 档案名仅支持英文字母、数字、下划线和连字符。'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <Input
+                        value={renameState?.value || ''}
+                        onChange={(e) => setRenameState((prev) => (prev ? { ...prev, value: e.target.value } : null))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); }}
+                        autoFocus
+                    />
+                    <DialogFooter>
+                        <Button variant="ghost" size="sm" onClick={() => setRenameState(null)}>取消</Button>
+                        <Button
+                            size="sm"
+                            onClick={handleRenameSubmit}
+                            disabled={busyKey === 'rename' || !renameState?.value.trim() || renameState?.value.trim() === renameState?.currentName}
+                        >
+                            {busyKey === 'rename' && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                            确认修改
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Unified Confirmation AlertDialog */}
+            <AlertDialog open={confirmAction !== null} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {confirmAction?.kind === 'swap-ide' && `切换到 IDE 档案 "${confirmAction.target}"？`}
+                            {confirmAction?.kind === 'start-add-ide' && '添加新的 Google 账号？'}
+                            {confirmAction?.kind === 'delete-ide' && `删除 IDE 档案 "${confirmAction.target}"？`}
+                            {confirmAction?.kind === 'delete-oauth' && `移除 OAuth 账号「${confirmAction.target}」？`}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {confirmAction?.kind === 'swap-ide' && (
+                                env?.ideRunning
+                                    ? '检测到桌面 Antigravity IDE 正在运行，此操作将安全关闭并重启 IDE 以加载新档案（约 10 秒）。'
+                                    : '当前桌面 IDE 未运行，将直接切换配置目录并设目标档案为激活状态。'
+                            )}
+                            {confirmAction?.kind === 'start-add-ide' && '此操作将保存当前档案目录并清空工作登录态，方便登录全新的 Google 账号。'}
+                            {confirmAction?.kind === 'delete-ide' && `将永久删除档案目录 "${confirmAction.target}" 及其缓存快照，该操作不可撤销。`}
+                            {confirmAction?.kind === 'delete-oauth' && `将从 ~/.gemini/accounts 移除「${confirmAction.target}」${confirmAction.email ? ` (${confirmAction.email})` : ''} 的本地凭据文件。`}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>取消</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleConfirmExecute}
+                            className={
+                                confirmAction?.kind === 'delete-ide' || confirmAction?.kind === 'delete-oauth'
+                                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                                    : undefined
+                            }
+                        >
+                            确认
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </>
     );
 }

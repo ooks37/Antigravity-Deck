@@ -1,19 +1,80 @@
-// === Profile Routes ===
-// /api/profiles/*
+// === Profile & Multi-Account Routes ===
+// /api/profiles/*  (Cross-platform IDE profile folder switching)
+// /api/accounts/oauth/*  (Headless / VPS / CLI 0-second OAuth credential switching)
 
-const { listProfiles, getActiveProfile, swapProfile, createProfile, deleteProfile, getProfileMetadata, startAddAccount, cancelAddAccount, assertProfileSwapSupported } = require('../profile-manager');
+const {
+    listProfiles,
+    getActiveProfile,
+    swapProfile,
+    createProfile,
+    deleteProfile,
+    renameProfile,
+    getProfileMetadata,
+    startAddAccount,
+    cancelAddAccount,
+    assertProfileSwapSupported,
+    getProfileEnvironment,
+} = require('../profile-manager');
+const {
+    listOAuthAccounts,
+    saveCurrentOAuthAccount,
+    useOAuthAccount,
+    importOAuthAccount,
+    renameOAuthAccount,
+    deleteOAuthAccount,
+} = require('../oauth-accounts');
 const { callApi } = require('../api');
 const { getFirstActiveInstance } = require('../detector');
 
-// Profile mutations are Windows-only (EPLATFORM from profile-manager) → 501 Not Implemented
 const errStatus = (e, fallback) => (e.code === 'EPLATFORM' ? 501 : fallback);
 
+async function resolveCurrentAccountMetadata() {
+    const inst = getFirstActiveInstance();
+    if (inst) {
+        try {
+            const userStatus = await callApi('GetUserStatus', {}, inst);
+            const email = userStatus?.userStatus?.email || null;
+            if (email || userStatus?.userStatus?.name) {
+                return {
+                    userName: userStatus?.userStatus?.name || null,
+                    email,
+                    tier: userStatus?.userStatus?.userTier?.name || null,
+                    plan: userStatus?.userStatus?.planStatus?.planInfo?.planName || null,
+                    savedAt: new Date().toISOString(),
+                };
+            }
+        } catch { /* fall back to local OAuth metadata */ }
+    }
+
+    const oauth = listOAuthAccounts();
+    if (oauth.activeEmail || oauth.activeName) {
+        return {
+            userName: oauth.activeName || (oauth.activeEmail ? oauth.activeEmail.split('@')[0] : null),
+            email: oauth.activeEmail || null,
+            tier: null,
+            plan: null,
+            savedAt: new Date().toISOString(),
+        };
+    }
+    return null;
+}
+
 module.exports = function setupProfilesRoutes(app) {
-    app.get('/api/profiles', (req, res) => {
+    // === Unified Profile + OAuth Overview ===
+    app.get('/api/profiles', async (req, res) => {
         try {
             const names = listProfiles();
             const profiles = names.map(name => ({ name, meta: getProfileMetadata(name) }));
-            res.json({ profiles, active: getActiveProfile() });
+            const [environment, oauth] = await Promise.all([
+                getProfileEnvironment().catch(() => null),
+                Promise.resolve().then(() => listOAuthAccounts()).catch(() => null),
+            ]);
+            res.json({
+                profiles,
+                active: getActiveProfile(),
+                environment,
+                oauth,
+            });
         } catch (e) {
             res.status(500).json({ error: e.message });
         }
@@ -25,68 +86,64 @@ module.exports = function setupProfilesRoutes(app) {
 
     app.post('/api/profiles/swap', (req, res) => {
         const { targetProfile } = req.body || {};
-        if (!targetProfile) return res.status(400).json({ error: 'targetProfile required' });
+        if (!targetProfile) return res.status(400).json({ error: '缺少 targetProfile 参数' });
         swapProfile(targetProfile)
             .then(result => res.json(result))
             .catch(e => {
-                const status = e.message.includes('already in progress') ? 409
-                    : e.message.includes('not found') ? 404 : errStatus(e, 500);
-                res.status(status).json({ error: e.message });
+                const msg = e.message || '';
+                const status = msg.includes('正在进行中') ? 409
+                    : msg.includes('未找到') ? 404 : errStatus(e, 500);
+                res.status(status).json({ error: msg });
             });
     });
 
-    // Auto-create default profile from current IDE account (onboarding — only when 0 profiles exist)
-    app.post('/api/profiles/auto-onboard', (req, res) => {
-        // Short-circuit before touching the LS API — frontend auto-calls this on
-        // every mount; on macOS/Linux it must get a consistent 501 immediately.
-        try { assertProfileSwapSupported(); } catch (e) { return res.status(501).json({ error: e.message }); }
-        const active = getActiveProfile();
-        const existing = listProfiles();
-        // Run onboard when: no profiles exist OR we're in "adding" state (activeProfile=null but profiles exist)
-        if (active && existing.length > 0) return res.json({ skipped: true, message: 'Profile already active', active });
+    // Auto-create default IDE profile when 0 profiles exist (graceful fallback on VPS/headless)
+    app.post('/api/profiles/auto-onboard', async (req, res) => {
+        try {
+            assertProfileSwapSupported();
+            const active = getActiveProfile();
+            const existing = listProfiles();
+            if (active && existing.length > 0) {
+                return res.json({ skipped: true, message: '已有激活的账号档案', active });
+            }
 
-        const inst = getFirstActiveInstance();
-        if (!inst) return res.status(400).json({ error: 'IDE is not running. Open Antigravity IDE and login first.' });
+            const metadata = await resolveCurrentAccountMetadata();
+            const email = metadata?.email;
+            if (!email) {
+                return res.json({ skipped: true, message: '未检测到在线 IDE 登录态，可先在 OAuth 账号池导入或手动创建档案' });
+            }
 
-        callApi('GetUserStatus', {}, inst).catch(() => null).then(userStatus => {
-            const email = userStatus?.userStatus?.email;
-            if (!email) return res.status(400).json({ error: 'Could not detect IDE account. Make sure you are logged in.' });
-
-            const userName = userStatus?.userStatus?.name;
-            const tierName = userStatus?.userStatus?.userTier?.name;
-            const planName = userStatus?.userStatus?.planStatus?.planInfo?.planName;
             const autoName = email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 30) || 'default';
-            const metadata = { userName: userName || null, email, tier: tierName || null, plan: planName || null, savedAt: new Date().toISOString() };
             const result = createProfile(autoName, metadata);
             res.json({ ...result, autoName });
-        }).catch(e => {
+        } catch (e) {
             res.status(errStatus(e, 400)).json({ error: e.message });
-        });
+        }
     });
 
-    app.post('/api/profiles/create', (req, res) => {
+    app.post('/api/profiles/create', async (req, res) => {
         const { name, force } = req.body || {};
-        if (!name) return res.status(400).json({ error: 'name required' });
+        if (!name) return res.status(400).json({ error: '缺少 name 参数' });
 
-        // Try to fetch current user info from IDE for profile metadata
-        const inst = getFirstActiveInstance();
-        const metaPromise = inst
-            ? callApi('GetUserStatus', {}, inst).catch(() => null).then(userStatus => ({
-                userName: userStatus?.userStatus?.name || null,
-                email: userStatus?.userStatus?.email || null,
-                tier: userStatus?.userStatus?.userTier?.name || null,
-                plan: userStatus?.userStatus?.planStatus?.planInfo?.planName || null,
-                savedAt: new Date().toISOString(),
-            })).catch(() => null)
-            : Promise.resolve(null);
-
-        metaPromise.then(metadata => {
+        try {
+            const metadata = await resolveCurrentAccountMetadata();
             const result = createProfile(name, metadata, { force: !!force });
             res.json(result);
-        }).catch(e => {
-            const status = e.message.includes('already saved as profile') ? 409 : errStatus(e, 400);
+        } catch (e) {
+            const status = e.message.includes('已保存为档案') ? 409 : errStatus(e, 400);
             res.status(status).json({ error: e.message });
-        });
+        }
+    });
+
+    app.patch('/api/profiles/:name', (req, res) => {
+        const { newName } = req.body || {};
+        if (!newName) return res.status(400).json({ error: '缺少 newName 参数' });
+        try {
+            res.json(renameProfile(req.params.name, newName));
+        } catch (e) {
+            const status = e.message.includes('未找到') ? 404 : 400;
+            res.status(status).json({ error: e.message });
+        }
     });
 
     app.delete('/api/profiles/:name', (req, res) => {
@@ -97,19 +154,86 @@ module.exports = function setupProfilesRoutes(app) {
         }
     });
 
-    // Start "Add New Account" flow — saves current, launches fresh IDE for new login
     app.post('/api/profiles/add-account', (req, res) => {
         startAddAccount()
             .then(result => res.json(result))
             .catch(e => res.status(errStatus(e, 500)).json({ error: e.message }));
     });
 
-    // Cancel add account — restore previous profile
     app.post('/api/profiles/cancel-add', (req, res) => {
         const { previousProfile } = req.body || {};
-        if (!previousProfile) return res.status(400).json({ error: 'previousProfile required' });
+        if (!previousProfile) return res.status(400).json({ error: '缺少 previousProfile 参数' });
         cancelAddAccount(previousProfile)
             .then(result => res.json(result))
             .catch(e => res.status(errStatus(e, 500)).json({ error: e.message }));
+    });
+
+    // === OAuth / agy CLI Account Pool (0-second headless + cross-platform switch) ===
+    app.get('/api/accounts/oauth', (req, res) => {
+        try {
+            res.json(listOAuthAccounts());
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/accounts/oauth/save', async (req, res) => {
+        const { alias, force } = req.body || {};
+        try {
+            const result = await saveCurrentOAuthAccount(alias || '', { force: !!force });
+            res.json(result);
+        } catch (e) {
+            const status = e.message.includes('已保存为') || e.message.includes('已存在') ? 409 : 400;
+            res.status(status).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/accounts/oauth/import', async (req, res) => {
+        const { alias, credentialJson, force, activate } = req.body || {};
+        if (!credentialJson) return res.status(400).json({ error: '请提供 OAuth 凭据 JSON' });
+        try {
+            const result = await importOAuthAccount({
+                alias,
+                credentialJson,
+                force: !!force,
+                activate: !!activate,
+            });
+            res.json(result);
+        } catch (e) {
+            const status = e.message.includes('已保存为') || e.message.includes('已存在') ? 409 : 400;
+            res.status(status).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/accounts/oauth/use', async (req, res) => {
+        const { target } = req.body || {};
+        if (!target) return res.status(400).json({ error: '缺少 target 参数' });
+        try {
+            const result = await useOAuthAccount(target);
+            res.json(result);
+        } catch (e) {
+            const status = e.message.includes('未找到') ? 404 : 400;
+            res.status(status).json({ error: e.message });
+        }
+    });
+
+    app.patch('/api/accounts/oauth/:alias', (req, res) => {
+        const { newAlias } = req.body || {};
+        if (!newAlias) return res.status(400).json({ error: '缺少 newAlias 参数' });
+        try {
+            res.json(renameOAuthAccount(req.params.alias, newAlias));
+        } catch (e) {
+            const status = e.message.includes('未找到') ? 404 : e.message.includes('已存在') ? 409 : 400;
+            res.status(status).json({ error: e.message });
+        }
+    });
+
+    app.delete('/api/accounts/oauth/:alias', (req, res) => {
+        try {
+            res.json(deleteOAuthAccount(req.params.alias));
+        } catch (e) {
+            const status = e.message.includes('未找到') ? 404 : 400;
+            res.status(status).json({ error: e.message });
+        }
     });
 };

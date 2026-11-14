@@ -7,7 +7,7 @@ import { extractStepContent, exportToMarkdown } from '@/lib/step-utils';
 import { Timeline } from '@/components/timeline';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, WifiOff, Rocket, Loader2, Check, Smartphone, Share2, X } from 'lucide-react';
+import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, WifiOff, Rocket, Loader2, Check, Smartphone, Share2, X, Users, Settings, KeyRound } from 'lucide-react';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import type { Project } from '@/lib/conversations';
@@ -32,7 +32,7 @@ import { WorkspaceOnboardModal } from '@/components/workspace-onboard-modal';
 import { notificationService } from '@/lib/notifications';
 import { initAppLogger } from '@/lib/app-logger';
 import { usePwaInstall } from '@/hooks/use-pwa-install';
-import { getSettings } from '@/lib/cascade-api';
+import { getSettings, getProfiles } from '@/lib/cascade-api';
 
 
 // Lazy-load components that are hidden by default
@@ -108,6 +108,32 @@ export default function Home() {
     return false;
   });
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [accountBadge, setAccountBadge] = useState<{ label: string; email: string | null; total: number } | null>(null);
+
+  const refreshAccountBadge = useCallback(() => {
+    getProfiles()
+      .then((d) => {
+        const oauthLabel = d.oauth?.activeAlias || d.oauth?.activeName || (d.oauth?.activeEmail ? d.oauth.activeEmail.split('@')[0] : null);
+        const label = oauthLabel || d.active || '';
+        const total = (d.oauth?.accounts?.length || 0) || d.profiles.length;
+        setAccountBadge({
+          label,
+          email: d.oauth?.activeEmail || null,
+          total,
+        });
+      })
+      .catch(() => { /* keep previous */ });
+  }, []);
+
+  useEffect(() => {
+    refreshAccountBadge();
+    window.addEventListener('oauth-account-swapped', refreshAccountBadge);
+    window.addEventListener('profile-swapped', refreshAccountBadge);
+    return () => {
+      window.removeEventListener('oauth-account-swapped', refreshAccountBadge);
+      window.removeEventListener('profile-swapped', refreshAccountBadge);
+    };
+  }, [refreshAccountBadge]);
 
   // === PWA Notification service init + App Logger ===
   useEffect(() => {
@@ -539,8 +565,25 @@ export default function Home() {
               )}
               {showChat && <span className="text-xs text-muted-foreground font-mono hidden md:inline">{steps.length > 0 ? `${steps.length} 步` : ''}</span>}
               {lastUpdate && <span className="text-xs text-muted-foreground hidden md:inline">{lastUpdate}</span>}
-              {/* Status indicators — WS connection + LS detection */}
+              {/* Status & Quick Account Bar */}
               <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handleShowAccountInfo}
+                  title={accountBadge?.email ? `当前账号: ${accountBadge.email}（点击切换/管理）` : '点击打开多账号管理与配额'}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
+                    showAccountInfo
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                      : 'bg-muted/40 hover:bg-muted text-foreground/80 border-border/50'
+                  }`}
+                >
+                  <Users className="w-3 h-3 text-indigo-400" />
+                  <span className="max-w-[90px] truncate hidden sm:inline">
+                    {accountBadge?.label || '多账号'}
+                  </span>
+                  {accountBadge && accountBadge.total > 0 && (
+                    <span className="text-[9px] text-muted-foreground hidden md:inline">({accountBadge.total})</span>
+                  )}
+                </button>
                 {/* WebSocket connection status */}
                 <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${connected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
                   <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
@@ -599,8 +642,8 @@ export default function Home() {
           )}
 
           {/* === Main panel content === */}
-          {!detected && !showSettings && (
-            <div className="flex-1 flex items-center justify-center">
+          {!detected && !showSettings && !showAccountInfo && !showResources && (
+            <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
               {swapping ? (
                 <div className="text-center space-y-4 max-w-sm">
                   <div className="flex items-center justify-center gap-3">
@@ -608,42 +651,61 @@ export default function Home() {
                     <h2 className="text-xl font-semibold text-foreground/80">正在切换账号...</h2>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    正在关闭 IDE、切换账号配置并重新启动，预计需要约 10 秒。
+                    正在安全保存并切换账号配置，预计需要几秒钟。
                   </p>
                   <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground/70">
                     <span className="relative flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400/75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
                     </span>
-                    <span>等待 Antigravity 重新启动...</span>
+                    <span>等待 Antigravity 就绪...</span>
                   </div>
                 </div>
               ) : (
-              <div className="text-center space-y-5 max-w-sm">
+              <div className="text-center space-y-5 max-w-md w-full">
                 <div className="flex items-center justify-center gap-3">
-                  <WifiOff className="w-8 h-8 text-muted-foreground/50" />
-                  <h2 className="text-xl font-semibold text-foreground/80">未检测到 Antigravity 服务</h2>
+                  <WifiOff className="w-7 h-7 text-muted-foreground/60" />
+                  <h2 className="text-xl font-semibold text-foreground/90">未检测到 Antigravity 服务</h2>
                 </div>
-                <ol className="text-left space-y-2.5 rounded-lg bg-muted/10 border border-border/30 px-5 py-4">
+
+                {accountBadge?.label && (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-400">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>当前活跃账号: <strong>{accountBadge.label}</strong>{accountBadge.email ? ` (${accountBadge.email})` : ''}</span>
+                  </div>
+                )}
+
+                <ol className="text-left space-y-2.5 rounded-xl bg-muted/15 border border-border/40 px-5 py-4">
                   {[
-                    '打开 Antigravity IDE',
-                    '在 Antigravity 中打开一个项目文件夹',
-                    'Antigravity Deck 将在约 10 秒内自动发现并连接',
+                    '本地桌面模式：打开 Antigravity IDE 并打开项目文件夹即可自动连接',
+                    'Linux VPS / CLI 模式：可直接管理多用户 OAuth 账号池并手动更新 agy CLI',
+                    '桌面启动后 Antigravity Deck 将在约 10 秒内自动发现服务',
                   ].map((text, i) => (
-                    <li key={i} className="flex items-start gap-3 text-sm text-muted-foreground">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted/30 flex items-center justify-center text-xs font-medium text-muted-foreground/80">
+                    <li key={i} className="flex items-start gap-3 text-xs sm:text-sm text-muted-foreground">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted/40 flex items-center justify-center text-xs font-medium text-foreground/80">
                         {i + 1}
                       </span>
                       <span>{text}</span>
                     </li>
                   ))}
                 </ol>
-                <div className="flex flex-col items-center gap-2">
-                  <LaunchIdeButton />
+
+                <div className="flex flex-col items-center gap-2.5">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      onClick={handleShowAccountInfo}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition-colors cursor-pointer"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      多账号切换 / 管理
+                    </button>
+                    <LaunchIdeButton />
+                  </div>
                   <button
                     onClick={handleShowSettings}
-                    className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors cursor-pointer"
                   >
+                    <Settings className="w-3 h-3" />
                     打开应用设置 / 手动更新 agy CLI
                   </button>
                 </div>
@@ -659,7 +721,22 @@ export default function Home() {
             </div>
           )}
 
-          {detected && showAccountInfo && <AccountInfoView />}
+          {showAccountInfo && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {!detected && (
+                <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-300">
+                  <span>当前尚未检测到运行中的 Antigravity IDE，你仍可在此零延迟切换、导入与管理全部 OAuth / 档案账号。</span>
+                  <button
+                    onClick={handleGoHome}
+                    className="underline hover:text-amber-200 flex-shrink-0 ml-3 cursor-pointer"
+                  >
+                    返回检测界面
+                  </button>
+                </div>
+              )}
+              <AccountInfoView detected={detected} onBackHome={handleGoHome} />
+            </div>
+          )}
 
           {showSettings && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">

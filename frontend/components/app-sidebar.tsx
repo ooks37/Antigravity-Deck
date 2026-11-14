@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { createWorkspace } from "@/lib/cascade-api"
-import type { ResourceSnapshot } from "@/lib/cascade-api"
+import { createWorkspace, getProfiles, useOAuthAccount } from "@/lib/cascade-api"
+import type { OAuthListResponse, ResourceSnapshot } from "@/lib/cascade-api"
 import { loadConversationIndex, groupByProject } from "@/lib/conversations"
 import type { Project, ConvRow } from "@/lib/conversations"
 import { cn } from "@/lib/utils"
@@ -41,10 +41,14 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
     DropdownMenuSeparator,
+    DropdownMenuSub,
+    DropdownMenuSubContent,
+    DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Settings, User, Plug, Book, Globe, Moon, Sun, Plus, FolderPlus, EllipsisVertical, Activity, FolderSync, Loader2, GitBranch, Monitor, Workflow, Brain, History, MessageSquare } from "lucide-react"
+import { Settings, Users, Check, KeyRound, Plug, ArrowLeftRight, Moon, Sun, Plus, FolderPlus, EllipsisVertical, Activity, FolderSync, Loader2, GitBranch, Monitor, Workflow, Brain, History, MessageSquare } from "lucide-react"
 
 import { ProjectGroup } from "./sidebar/project-group"
 import { SystemResourceSummary } from "./sidebar/system-resource-summary"
@@ -116,8 +120,11 @@ export function AppSidebar({
     const [createError, setCreateError] = useState("")
     const [showCreateDialog, setShowCreateDialog] = useState(false)
 
-    // User profile state
+    // User profile & cross-platform multi-account summary
     const [userProfile, setUserProfile] = useState<{ name: string; tier: string; avatar: string | null } | null>(null)
+    const [oauthStatus, setOAuthStatus] = useState<OAuthListResponse | null>(null)
+    const [ideActiveProfile, setIdeActiveProfile] = useState<string | null>(null)
+    const [switchingAlias, setSwitchingAlias] = useState<string | null>(null)
 
     const hasLoadedRef = useRef(false)
     const didInitExpandRef = useRef(false)
@@ -133,16 +140,26 @@ export function AppSidebar({
         return ""
     }, [newName, projects])
 
+    const fetchAccountSummary = useCallback(() => {
+        getProfiles()
+            .then(data => {
+                setOAuthStatus(data.oauth || null)
+                setIdeActiveProfile(data.active || null)
+            })
+            .catch(() => { })
+    }, [])
+
     // Fetch user profile on mount and when connection is established
     const fetchUserProfile = useCallback(() => {
+        fetchAccountSummary()
         if (!detected) {
             setUserProfile(null)
             return
         }
         fetch(`${API_BASE}/api/user/profile`, { headers: authHeaders() })
-            .then(r => r.json())
+            .then(r => (r.ok ? r.json() : null))
             .then(d => {
-                const u = d.user
+                const u = d?.user
                 if (!u) return
                 setUserProfile({
                     name: u.name || 'User',
@@ -151,21 +168,44 @@ export function AppSidebar({
                 })
             })
             .catch(() => { })
-    }, [detected])
+    }, [detected, fetchAccountSummary])
 
     useEffect(() => {
         fetchUserProfile()
     }, [fetchUserProfile])
 
-    // Re-fetch profile when profile swap happens
+    // Re-fetch profile when IDE or OAuth swap happens
     useEffect(() => {
-        const handler = () => {
+        const handleIdeSwap = () => {
+            fetchAccountSummary()
             const attempts = [5000, 8000, 12000];
             attempts.forEach(delay => setTimeout(() => fetchUserProfile(), delay));
         }
-        window.addEventListener('profile-swapped', handler)
-        return () => window.removeEventListener('profile-swapped', handler)
-    }, [fetchUserProfile])
+        const handleOAuthSwap = () => {
+            fetchAccountSummary()
+        }
+        window.addEventListener('profile-swapped', handleIdeSwap)
+        window.addEventListener('oauth-account-swapped', handleOAuthSwap)
+        return () => {
+            window.removeEventListener('profile-swapped', handleIdeSwap)
+            window.removeEventListener('oauth-account-swapped', handleOAuthSwap)
+        }
+    }, [fetchUserProfile, fetchAccountSummary])
+
+    const handleQuickSwitchOAuth = useCallback(async (alias: string) => {
+        if (switchingAlias) return
+        setSwitchingAlias(alias)
+        try {
+            const res = await useOAuthAccount(alias)
+            fetchAccountSummary()
+            window.dispatchEvent(new CustomEvent('oauth-account-swapped', { detail: res }))
+        } catch {
+            // If quick switch fails, open full manager
+            onShowAccountInfo()
+        } finally {
+            setSwitchingAlias(null)
+        }
+    }, [switchingAlias, fetchAccountSummary, onShowAccountInfo])
 
     const loadIndex = useCallback(async () => {
         try {
@@ -414,23 +454,41 @@ export function AppSidebar({
                                         size="lg"
                                         className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                                     >
-                                        <Avatar className="h-8 w-8 rounded-lg">
-                                            {userProfile?.avatar && (
-                                                <AvatarImage src={`data:image/png;base64,${userProfile.avatar}`} alt={userProfile.name} />
+                                        <div className="relative">
+                                            <Avatar className="h-8 w-8 rounded-lg">
+                                                {userProfile?.avatar && (
+                                                    <AvatarImage src={`data:image/png;base64,${userProfile.avatar}`} alt={userProfile.name} />
+                                                )}
+                                                <AvatarFallback className={cn(
+                                                    "rounded-lg text-xs font-semibold",
+                                                    (detected || oauthStatus?.activeEmail || ideActiveProfile)
+                                                        ? "bg-indigo-500/20 text-indigo-400"
+                                                        : "bg-muted text-muted-foreground"
+                                                )}>
+                                                    {(userProfile?.name || oauthStatus?.activeAlias || oauthStatus?.activeName || ideActiveProfile || '?')[0]?.toUpperCase()}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            {(oauthStatus?.activeEmail || detected) && (
+                                                <span className={cn(
+                                                    "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-sidebar",
+                                                    detected ? "bg-emerald-400" : "bg-sky-400"
+                                                )} />
                                             )}
-                                            <AvatarFallback className={cn(
-                                                "rounded-lg text-xs font-semibold",
-                                                detected ? "bg-indigo-500/20 text-indigo-400" : "bg-muted text-muted-foreground"
-                                            )}>
-                                                {userProfile?.name?.[0]?.toUpperCase() ?? (detected ? '?' : '—')}
-                                            </AvatarFallback>
-                                        </Avatar>
+                                        </div>
                                         <div className="grid flex-1 text-left text-sm leading-tight">
                                             <span className="truncate font-medium text-xs">
-                                                {userProfile?.name ?? (detected ? '加载中...' : '未连接')}
+                                                {userProfile?.name
+                                                    ?? oauthStatus?.activeAlias
+                                                    ?? oauthStatus?.activeName
+                                                    ?? ideActiveProfile
+                                                    ?? (detected ? '加载中...' : '未选择账号')}
                                             </span>
                                             <span className="truncate text-[10px] text-sidebar-foreground/60">
-                                                {userProfile?.tier ?? (detected ? '' : '请先打开 Antigravity IDE')}
+                                                {userProfile?.tier
+                                                    || oauthStatus?.activeEmail
+                                                    || (oauthStatus?.accounts?.length
+                                                        ? `已保存 ${oauthStatus.accounts.length} 个 OAuth 账号`
+                                                        : (detected ? '在线' : '点击切换或导入账号'))}
                                             </span>
                                         </div>
                                         <EllipsisVertical className="ml-auto size-4" />
@@ -440,17 +498,61 @@ export function AppSidebar({
                                     side={isMobile ? "bottom" : "right"}
                                     align="end"
                                     sideOffset={4}
-                                    className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+                                    className="w-[--radix-dropdown-menu-trigger-width] min-w-60 rounded-lg"
                                 >
+                                    <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground truncate">
+                                        {oauthStatus?.activeEmail
+                                            ? `当前 OAuth: ${oauthStatus.activeEmail}`
+                                            : (ideActiveProfile ? `当前档案: ${ideActiveProfile}` : '多账号切换中心')}
+                                    </DropdownMenuLabel>
                                     <DropdownMenuItem onClick={onShowAccountInfo}>
-                                        <User className="mr-2 h-4 w-4" />
-                                        <span>账户与配额</span>
+                                        <Users className="mr-2 h-4 w-4 text-indigo-400" />
+                                        <span>多账号管理与配额</span>
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={onShowLogs}>
+                                    {oauthStatus && oauthStatus.accounts.length > 0 && (
+                                        <DropdownMenuSub>
+                                            <DropdownMenuSubTrigger>
+                                                <ArrowLeftRight className="mr-2 h-4 w-4 text-emerald-400" />
+                                                <span>快速切换 OAuth ({oauthStatus.accounts.length})</span>
+                                            </DropdownMenuSubTrigger>
+                                            <DropdownMenuSubContent className="min-w-52 max-h-72 overflow-y-auto">
+                                                {oauthStatus.accounts.map((acc) => (
+                                                    <DropdownMenuItem
+                                                        key={acc.alias}
+                                                        disabled={switchingAlias !== null}
+                                                        onClick={() => handleQuickSwitchOAuth(acc.alias)}
+                                                        className="flex items-center justify-between gap-2"
+                                                    >
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-xs font-medium truncate flex items-center gap-1">
+                                                                <KeyRound className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                                                <span className="truncate">{acc.alias}</span>
+                                                            </div>
+                                                            {acc.email && (
+                                                                <div className="text-[10px] text-muted-foreground truncate pl-4">{acc.email}</div>
+                                                            )}
+                                                        </div>
+                                                        {switchingAlias === acc.alias ? (
+                                                            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                                                        ) : acc.isActive ? (
+                                                            <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                                        ) : null}
+                                                    </DropdownMenuItem>
+                                                ))}
+                                                <DropdownMenuSeparator />
+                                                <DropdownMenuItem onClick={onShowAccountInfo}>
+                                                    <Plus className="mr-2 h-3.5 w-3.5" />
+                                                    <span className="text-xs">导入 / 管理全部账号...</span>
+                                                </DropdownMenuItem>
+                                            </DropdownMenuSubContent>
+                                        </DropdownMenuSub>
+                                    )}
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={onShowLogs} disabled={!detected}>
                                         <Activity className="mr-2 h-4 w-4" />
                                         <span>实时日志</span>
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={onShowSourceControl}>
+                                    <DropdownMenuItem onClick={onShowSourceControl} disabled={!detected}>
                                         <GitBranch className="mr-2 h-4 w-4" />
                                         <span>源代码管理</span>
                                     </DropdownMenuItem>
@@ -461,15 +563,6 @@ export function AppSidebar({
                                     <DropdownMenuItem onClick={toggleTheme}>
                                         {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
                                         <span>{isDark ? "浅色模式" : "深色模式"}</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem disabled>
-                                        <Book className="mr-2 h-4 w-4 text-muted-foreground" />
-                                        <span className="text-muted-foreground">知识库 (敬请期待)</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem disabled>
-                                        <Globe className="mr-2 h-4 w-4 text-muted-foreground" />
-                                        <span className="text-muted-foreground">内置浏览器 (敬请期待)</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem onClick={onShowSettings}>
