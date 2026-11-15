@@ -1,118 +1,186 @@
 'use client';
-import { useState, useCallback, useEffect } from 'react';
-import { setAuthKey, getAuthKey } from '@/lib/auth';
-import { API_BASE } from '@/lib/config';
+
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Lock } from 'lucide-react';
+import { clearAuthKey, setAuthKey } from '@/lib/auth';
+import { authLogin, authLogout, fetchAuthMe, type UserProfile } from '@/lib/cascade-api';
+import { Eye, EyeOff, Loader2, Lock } from 'lucide-react';
+
+interface AuthContextValue {
+    user: UserProfile | null;
+    authEnabled: boolean;
+    loading: boolean;
+    refreshUser: () => Promise<void>;
+    logout: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextValue>({
+    user: null,
+    authEnabled: true,
+    loading: true,
+    refreshUser: async () => {},
+    logout: async () => {},
+});
+
+export function useAuthUser() {
+    return useContext(AuthContext);
+}
 
 interface AuthGateProps {
-    children: React.ReactNode;
+    children: ReactNode;
 }
 
 export function AuthGate({ children }: AuthGateProps) {
-    const [key, setKey] = useState('');
+    const [status, setStatus] = useState<'loading' | 'unauthenticated' | 'authenticated'>('loading');
+    const [authEnabled, setAuthEnabled] = useState(true);
+    const [user, setUser] = useState<UserProfile | null>(null);
+    const [username, setUsername] = useState('admin');
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
-    const [checking, setChecking] = useState(false);
-    const [authenticated, setAuthenticated] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
 
-    // Client-side auth check after hydration (avoids SSR mismatch)
-    useEffect(() => {
-        // Extract ?key= from URL first — must run before any early returns
-        // so that localhost:9808/?key=... correctly saves the key
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlKey = urlParams.get('key');
-        if (urlKey) {
-            // Strip key from URL immediately (security: don't leave in browser history)
-            const cleanUrl = new URL(window.location.href);
-            cleanUrl.searchParams.delete('key');
-            window.history.replaceState({}, '', cleanUrl.toString());
-            // Save key to localStorage so all subsequent API calls use it
-            setAuthKey(urlKey.trim());
-        }
-
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            setAuthenticated(true);
-            return;
-        }
-
-        const savedKey = urlKey || getAuthKey();
-        if (!savedKey) {
-            // No key anywhere — show login form
-            return;
-        }
-
-        // Validate key against backend (remote access)
-        setChecking(true);
-        fetch(`${API_BASE}/api/settings`, {
-            headers: { 'X-Auth-Key': savedKey.trim() }
-        }).then(res => {
-            if (res.ok) {
-                setAuthenticated(true);
+    const checkSession = useCallback(async () => {
+        try {
+            const me = await fetchAuthMe();
+            setAuthEnabled(me.authEnabled);
+            if (!me.authEnabled || (me.authenticated && me.user)) {
+                setUser(me.user);
+                setStatus('authenticated');
+                return;
             }
-            // If invalid, fall through to show auth gate
-        }).catch(() => {
-            // Network error — show auth gate
-        }).finally(() => setChecking(false));
+            setUser(null);
+            setStatus('unauthenticated');
+        } catch {
+            // Backend restarting or unreachable briefly: prompt sign-in cleanly without bypassing.
+            setUser(null);
+            setStatus('unauthenticated');
+        }
     }, []);
 
+    useEffect(() => {
+        checkSession();
+    }, [checkSession]);
 
-    const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    const logout = useCallback(async () => {
+        try { await authLogout(); } catch { /* ignore */ }
+        clearAuthKey();
+        setUser(null);
+        setPassword('');
+        setStatus('unauthenticated');
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!key.trim()) return;
-        setChecking(true);
-        setError('');
-
-        try {
-            const res = await fetch(`${API_BASE}/api/settings`, {
-                headers: { 'X-Auth-Key': key.trim() }
-            });
-            if (res.ok) {
-                setAuthKey(key.trim());
-                setAuthenticated(true);
-            } else {
-                setError('访问密钥无效');
-            }
-        } catch {
-            setError('无法连接到服务器');
-        } finally {
-            setChecking(false);
+        const u = username.trim();
+        const p = password.trim();
+        if (!u || !p) {
+            setError('请输入用户名和密码');
+            return;
         }
-    }, [key]);
+        setError('');
+        setSubmitting(true);
+        try {
+            const res = await authLogin(u, p);
+            if (res.token) setAuthKey(res.token);
+            setUser(res.user);
+            setPassword('');
+            setStatus('authenticated');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '登录失败，请检查账号和密码');
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
-    if (authenticated) return <>{children}</>;
+    if (status === 'loading') {
+        return (
+            <div className="min-h-dvh flex items-center justify-center bg-background">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>正在加载工作台...</span>
+                </div>
+            </div>
+        );
+    }
+
+    if (status === 'unauthenticated') {
+        return (
+            <div className="min-h-dvh flex items-center justify-center bg-background px-4">
+                <Card className="w-full max-w-[360px] border-border/60 shadow-sm">
+                    <CardHeader className="pb-4 space-y-1.5 text-center">
+                        <div className="mx-auto w-9 h-9 rounded-xl bg-muted flex items-center justify-center mb-1">
+                            <Lock className="h-4 w-4 text-foreground/80" />
+                        </div>
+                        <CardTitle className="text-base font-semibold tracking-tight">登录 Antigravity 工作台</CardTitle>
+                        <CardDescription className="text-xs">
+                            仅限授权账号访问，会话与记录按用户隔离
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <form onSubmit={handleSubmit} className="space-y-3">
+                            <div className="space-y-1.5">
+                                <label className="text-[11px] font-medium text-muted-foreground" htmlFor="login-username">
+                                    用户名
+                                </label>
+                                <Input
+                                    id="login-username"
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    placeholder="输入用户名"
+                                    autoComplete="username"
+                                    autoFocus
+                                    className="h-9 text-sm"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-[11px] font-medium text-muted-foreground" htmlFor="login-password">
+                                    密码
+                                </label>
+                                <div className="relative">
+                                    <Input
+                                        id="login-password"
+                                        type={showPassword ? 'text' : 'password'}
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        placeholder="输入密码"
+                                        autoComplete="current-password"
+                                        className="h-9 text-sm pr-9"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword((v) => !v)}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                                        aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                                    >
+                                        {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {error && (
+                                <p className="text-xs text-destructive bg-destructive/10 rounded-md px-2.5 py-1.5">
+                                    {error}
+                                </p>
+                            )}
+
+                            <Button type="submit" className="w-full h-9 text-sm" disabled={submitting}>
+                                {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                                {submitting ? '正在验证...' : '登录'}
+                            </Button>
+                        </form>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-dvh w-full bg-background flex items-center justify-center p-4">
-            <Card className="w-full max-w-sm">
-                <CardHeader className="text-center pb-2">
-                    <div className="mb-3"><Lock className="h-8 w-8 text-muted-foreground mx-auto" /></div>
-                    <CardTitle className="text-xl">Antigravity Deck</CardTitle>
-                    <CardDescription>请输入访问密钥以继续</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <Input
-                            type="password"
-                            value={key}
-                            onChange={(e) => setKey(e.target.value)}
-                            placeholder="访问密钥 (Access Key)"
-                            autoFocus
-                        />
-                        {error && (
-                            <p className="text-destructive text-xs text-center">{error}</p>
-                        )}
-                        <Button
-                            type="submit"
-                            className="w-full"
-                            disabled={checking || !key.trim()}
-                        >
-                            {checking ? '验证中...' : '进入控制台'}
-                        </Button>
-                    </form>
-                </CardContent>
-            </Card>
-        </div>
+        <AuthContext.Provider value={{ user, authEnabled, loading: false, refreshUser: checkSession, logout }}>
+            {children}
+        </AuthContext.Provider>
     );
 }

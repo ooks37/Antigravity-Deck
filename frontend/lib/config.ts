@@ -32,7 +32,13 @@ export async function getWsUrl(): Promise<string> {
 }
 
 async function _resolveWsUrl(): Promise<string> {
-    const hostname = window.location.hostname;
+    const { protocol, host, hostname, port } = window.location;
+    const wsProto = protocol === 'https:' ? 'wss' : 'ws';
+
+    // When served over HTTPS or directly by the backend (:3500), WebSockets terminate on the same origin.
+    if (protocol === 'https:' || (port && port !== '3000')) {
+        return `${wsProto}://${host}`;
+    }
 
     const isLocal =
         hostname === 'localhost' ||
@@ -44,18 +50,19 @@ async function _resolveWsUrl(): Promise<string> {
 
     if (isLocal) {
         try {
-            const res = await fetch('/api/ws-url');
-            const { wsPort } = await res.json();
-            return `ws://${hostname}:${wsPort}`;
-        } catch {
-            return `ws://${hostname}:3500`;
-        }
-    } else {
-        const tunnel = process.env.NEXT_PUBLIC_BACKEND_URL || '';
-        return tunnel
-            ? tunnel.replace(/^http/, 'ws')
-            : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+            const res = await fetch('/api/ws-url', { credentials: 'include' });
+            if (res.ok) {
+                const { wsPort } = await res.json();
+                return `ws://${hostname}:${wsPort}`;
+            }
+        } catch { /* fallback below */ }
+        return `ws://${hostname}:3500`;
     }
+
+    const tunnel = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+    return tunnel
+        ? tunnel.replace(/^http/, 'ws')
+        : `${wsProto}://${host}`;
 }
 
 function _refreshWsUrlCache() {

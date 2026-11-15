@@ -8,6 +8,17 @@ const { readCliConversationSteps, hasCliConversation } = require('./cli-conversa
 
 const stepCache = {};       // { convId: { steps: [], stepCount: N, baseIndex: M } }
 const fetchingSet = new Set(); // per-conversation fetching lock
+const MAX_CACHED_CONVS = 40;
+
+function pruneStepCache() {
+    const keys = Object.keys(stepCache);
+    if (keys.length <= MAX_CACHED_CONVS) return;
+    keys.sort((a, b) => (stepCache[a]?._ts || 0) - (stepCache[b]?._ts || 0));
+    const excess = keys.length - MAX_CACHED_CONVS;
+    for (let i = 0; i < excess; i++) {
+        delete stepCache[keys[i]];
+    }
+}
 
 // --- Step count ---
 
@@ -147,7 +158,8 @@ async function ensureCached(convId, inst = null) {
         const total = cliRes.totalSteps || cliRes.steps.length;
         const baseIndex = Math.max(0, total - STEP_WINDOW_SIZE);
         const windowedSteps = baseIndex > 0 ? cliRes.steps.slice(baseIndex) : cliRes.steps;
-        stepCache[convId] = { steps: windowedSteps, stepCount: total, baseIndex, source: 'cli-db' };
+        stepCache[convId] = { steps: windowedSteps, stepCount: total, baseIndex, source: 'cli-db', _ts: Date.now() };
+        pruneStepCache();
         console.log(`[✓] Loaded CLI DB ${convId.substring(0, 8)} (${windowedSteps.length}/${total} steps, base=${baseIndex})`);
         return true;
     };
@@ -180,7 +192,8 @@ async function ensureCached(convId, inst = null) {
         if (steps.length === 0 && hasCliConversation(convId) && tryCliFallback()) {
             return;
         }
-        stepCache[convId] = { steps, stepCount, baseIndex, source: 'ls' };
+        stepCache[convId] = { steps, stepCount, baseIndex, source: 'ls', _ts: Date.now() };
+        pruneStepCache();
         console.log(`[✓] Cached ${steps.length}/${stepCount} steps (window from ${baseIndex})${hasGaps ? ' (with gaps)' : ''}`);
     } catch (e) {
         if (tryCliFallback()) {

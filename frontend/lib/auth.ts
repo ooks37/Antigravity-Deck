@@ -1,66 +1,51 @@
-// === Auth Key Management ===
-// Stores auth key in both localStorage AND a cookie for resilience.
-// Mobile browsers can purge localStorage when killing tabs under memory pressure,
-// but cookies survive. We read from both and sync if one is missing.
+// === Multi-User Session Token & Cookie Helpers ===
+// Backend sets HttpOnly `ag_session` cookie on POST /api/auth/login.
+// We also persist the opaque session token in localStorage so WebSocket upgrades
+// (which can drop cookies behind strict proxies) and Bearer headers work seamlessly.
 
-const AUTH_KEY_STORAGE = 'antigravity_auth_key';
-const AUTH_KEY_COOKIE = 'ag_auth_key';
-
-function getCookie(name: string): string {
-    if (typeof document === 'undefined') return '';
-    const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
-    return match ? decodeURIComponent(match[1]) : '';
-}
-
-function setCookie(name: string, value: string): void {
-    if (typeof document === 'undefined') return;
-    // 30-day expiry, SameSite=Strict for security
-    document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${30 * 86400};SameSite=Strict`;
-}
-
-function deleteCookie(name: string): void {
-    if (typeof document === 'undefined') return;
-    document.cookie = `${name}=;path=/;max-age=0`;
-}
+const SESSION_TOKEN_STORAGE = 'ag_session_token';
+const LEGACY_AUTH_KEY_STORAGE = 'antigravity_auth_key';
 
 export function getAuthKey(): string {
     if (typeof window === 'undefined') return '';
-    const fromStorage = localStorage.getItem(AUTH_KEY_STORAGE) || '';
-    const fromCookie = getCookie(AUTH_KEY_COOKIE);
-
-    // Sync: if one has it and the other doesn't, restore the missing one
-    if (fromStorage && !fromCookie) setCookie(AUTH_KEY_COOKIE, fromStorage);
-    if (fromCookie && !fromStorage) localStorage.setItem(AUTH_KEY_STORAGE, fromCookie);
-
-    return fromStorage || fromCookie;
+    return localStorage.getItem(SESSION_TOKEN_STORAGE) || localStorage.getItem(LEGACY_AUTH_KEY_STORAGE) || '';
 }
 
-export function setAuthKey(key: string): void {
+export function setAuthKey(token: string): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(AUTH_KEY_STORAGE, key);
-    setCookie(AUTH_KEY_COOKIE, key);
+    localStorage.setItem(SESSION_TOKEN_STORAGE, token);
+    localStorage.removeItem(LEGACY_AUTH_KEY_STORAGE);
 }
 
 export function clearAuthKey(): void {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem(AUTH_KEY_STORAGE);
-    deleteCookie(AUTH_KEY_COOKIE);
+    localStorage.removeItem(SESSION_TOKEN_STORAGE);
+    localStorage.removeItem(LEGACY_AUTH_KEY_STORAGE);
 }
 
-// Build headers with auth key
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-    const key = getAuthKey();
+    const token = getAuthKey();
     return {
         'Content-Type': 'application/json',
-        ...(key ? { 'X-Auth-Key': key } : {}),
+        ...(token ? { Authorization: `Bearer ${token}`, 'X-Session-Token': token } : {}),
         ...extra,
     };
 }
 
-// Build WebSocket URL with auth key as query param
+export function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    const incomingHeaders = init.headers instanceof Headers
+        ? Object.fromEntries(init.headers.entries())
+        : (Array.isArray(init.headers) ? Object.fromEntries(init.headers) : (init.headers as Record<string, string> | undefined) || {});
+    return fetch(input, {
+        ...init,
+        credentials: 'include',
+        headers: authHeaders(incomingHeaders),
+    });
+}
+
 export function authWsUrl(baseUrl: string): string {
-    const key = getAuthKey();
-    if (!key) return baseUrl;
+    const token = getAuthKey();
+    if (!token) return baseUrl;
     const sep = baseUrl.includes('?') ? '&' : '?';
-    return `${baseUrl}${sep}auth_key=${encodeURIComponent(key)}`;
+    return `${baseUrl}${sep}token=${encodeURIComponent(token)}`;
 }

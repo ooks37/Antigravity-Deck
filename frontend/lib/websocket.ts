@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Step, ConversationsResponse, TrajectorySummary } from './types';
 import { extractStepContent } from './step-utils';
 import { API_BASE } from './config';
-import { authHeaders } from './auth';
+import { authFetch } from './auth';
 import { getCascadeStatus, getWorkspaceResources } from './cascade-api';
 import type { ResourceSnapshot } from './cascade-api';
 import { wsService } from './ws-service';
@@ -102,7 +102,8 @@ export function useWebSocket() {
 
     const loadConversations = useCallback(async () => {
         try {
-            const res = await fetch(`${API_BASE}/api/conversations`, { headers: authHeaders() });
+            const res = await authFetch(`${API_BASE}/api/conversations`);
+            if (!res.ok) return;
             const data: ConversationsResponse = await res.json();
             if (data.trajectorySummaries) {
                 setState(prev => ({ ...prev, conversations: data.trajectorySummaries! }));
@@ -379,7 +380,7 @@ export function useWebSocket() {
         setTimeout(async () => {
             if (currentConvIdRef.current !== id) return;
             try {
-                const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}/steps`, { headers: authHeaders() });
+                const res = await authFetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}/steps`);
                 if (!res.ok) return;
                 const data = await res.json();
                 setState(prev => {
@@ -459,9 +460,15 @@ export function useWebSocket() {
         let cancelled = false;
         const poll = async () => {
             try {
-                const res = await fetch(`${API_BASE}/api/status`, { headers: authHeaders() });
+                const res = await authFetch(`${API_BASE}/api/status`);
                 if (!res.ok) return;
                 const data = await res.json();
+                if (data.ideHubEnabled === false && !cancelled) {
+                    cancelled = true;
+                    cleanupRef.current?.();
+                    loadConversationsRef.current();
+                    return;
+                }
                 if (data.detected && !cancelled) {
                     console.log('[WS] HTTP fallback detected LS — setting detected=true');
                     setState(prev => ({
@@ -479,7 +486,7 @@ export function useWebSocket() {
             poll(); // immediate first check
             const interval = setInterval(() => {
                 if (!cancelled) poll();
-            }, 3000);
+            }, 6000);
             // Store interval for cleanup
             cleanupRef.current = () => clearInterval(interval);
         }, 5000);
@@ -491,5 +498,20 @@ export function useWebSocket() {
         };
     }, [state.detected]);
 
-    return { ...state, selectConversation, loadConversations, loadOlder };
+    const hydrateConversation = useCallback((id: string | null, steps: Step[], stepCount?: number) => {
+        setState(prev => ({
+            ...prev,
+            currentConvId: id,
+            steps,
+            baseIndex: 0,
+            stepCount: stepCount ?? steps.length,
+            stepsLoading: false,
+            convSource: 'cli-db',
+        }));
+        if (id && wsService?.connected) {
+            wsService.send({ type: 'set_conversation', conversationId: id });
+        }
+    }, []);
+
+    return { ...state, selectConversation, loadConversations, loadOlder, hydrateConversation };
 }

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { ImagePlus, Download, Maximize2, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { API_BASE } from '@/lib/config';
-import { authHeaders } from '@/lib/auth';
+import { authFetch } from '@/lib/auth';
 
 interface GeneratedImageStepProps {
     step: Step;
@@ -31,9 +31,8 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
         setLoading(true);
         setImageError(false);
         setImageSrc('');
-        fetch(`${API_BASE}/api/file/serve`, {
+        authFetch(`${API_BASE}/api/file/serve`, {
             method: 'POST',
-            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: uri }),
         })
             .then(r => r.ok ? r.json() : Promise.reject(r.status))
@@ -56,10 +55,10 @@ export const GeneratedImageStep = memo(function GeneratedImageStep({ step, origi
     return (
         <>
             <div className="mb-3 mx-4">
-                <div className="rounded-xl border border-border/50 bg-gradient-to-br from-purple-500/5 via-background to-pink-500/5 overflow-hidden">
+                <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
                     {/* Header */}
                     <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
-                        <ImagePlus className="h-4 w-4 text-purple-400" />
+                        <ImagePlus className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm font-medium text-foreground/90">{imageName}</span>
                         <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground/60 ml-auto">
                             #{originalIndex + 1}

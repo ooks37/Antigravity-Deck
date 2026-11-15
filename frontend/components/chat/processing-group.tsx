@@ -1,129 +1,140 @@
 'use client';
+
 import { useState, useMemo, memo } from 'react';
 import { Step } from '@/lib/types';
 import { extractStepContent, getStepConfig } from '@/lib/step-utils';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronRight, Wrench } from 'lucide-react';
+import { ChevronRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { StepIcon } from '../ui/step-icon';
 import { cn } from '@/lib/utils';
 import { WaitingStep } from './waiting-step';
-import { RawJsonViewer } from './raw-json-viewer';
 import { CodeChangeViewer } from './code-change-viewer';
 
 interface ProcessingGroupProps {
     steps: { step: Step; originalIndex: number }[];
-    cascadeId?: string | null;
-    /** Highest step index (same indexing space as originalIndex) that reached a
-     *  terminal status — used to detect stale WAITING steps. */
+    cascadeId: string | null;
     lastTerminalIndex?: number;
     onStepAccepted?: () => void;
 }
 
-export const ProcessingGroup = memo(function ProcessingGroup({ steps: groupSteps, cascadeId, lastTerminalIndex = -1, onStepAccepted }: ProcessingGroupProps) {
-    const [expanded, setExpanded] = useState(false);
+export const ProcessingGroup = memo(function ProcessingGroup({
+    steps: groupSteps,
+    cascadeId,
+    lastTerminalIndex = -1,
+    onStepAccepted,
+}: ProcessingGroupProps) {
+    const hasActive = useMemo(
+        () =>
+            groupSteps.some(
+                ({ step }) =>
+                    step.status === 'CORTEX_STEP_STATUS_IN_PROGRESS' ||
+                    step.status === 'CORTEX_STEP_STATUS_PENDING' ||
+                    step.status === 'CORTEX_STEP_STATUS_WAITING',
+            ),
+        [groupSteps],
+    );
+    const hasThinking = useMemo(
+        () => groupSteps.some(({ step }) => Boolean(step.plannerResponse?.thinking?.trim())),
+        [groupSteps],
+    );
 
-    // Separate WAITING steps that should be shown prominently
-    const { waitingSteps, codeAckSteps, normalSteps } = useMemo(() => {
-        const waiting: typeof groupSteps = [];
-        const codeAck: typeof groupSteps = [];
-        const normal: typeof groupSteps = [];
-        for (const item of groupSteps) {
-            // Handle both string status (JSON) and integer status (binary-decoded cache)
-            const s = item.step.status as string | number;
-            const isWaiting = s === 'CORTEX_STEP_STATUS_WAITING' || s === 9;
-            // A WAITING step is live unless a LATER step already reached a terminal
-            // status. Queued PENDING steps behind a gate must NOT hide it — permission
-            // gates often have follow-up tool steps queued while the gate blocks.
-            const isStale = isWaiting && lastTerminalIndex > item.originalIndex;
-            if (isWaiting && !isStale) {
-                waiting.push(item);
-            } else if (
-                (item.step.type === 'CORTEX_STEP_TYPE_CODE_ACKNOWLEDGEMENT' || item.step.codeAcknowledgement) &&
-                item.step.codeAcknowledgement?.codeAcknowledgementInfos?.some(info => info.diff?.lines?.length)
-            ) {
-                codeAck.push(item);
-            } else {
-                normal.push(item);
-            }
-        }
-        return { waitingSteps: waiting, codeAckSteps: codeAck, normalSteps: normal };
+    // Default open while actively streaming or waiting, compact when completed unless toggled.
+    const [open, setOpen] = useState(hasActive);
+
+    const summaryLabel = useMemo(() => {
+        const thoughts = groupSteps.filter(({ step }) => Boolean(step.plannerResponse?.thinking?.trim())).length;
+        const tools = groupSteps.length - thoughts;
+        const parts: string[] = [];
+        if (thoughts > 0) parts.push(`${thoughts} 项思考`);
+        if (tools > 0) parts.push(`${tools} 次工具调用`);
+        return parts.length > 0 ? parts.join(' · ') : `已执行 ${groupSteps.length} 步操作`;
+    }, [groupSteps]);
+
+    const visibleItems = useMemo(() => {
+        return groupSteps.filter(({ step, originalIndex }) => {
+            if (step.status === 'CORTEX_STEP_STATUS_WAITING' && originalIndex > lastTerminalIndex) return true;
+            if (step.plannerResponse?.thinking?.trim()) return true;
+            return Boolean(extractStepContent(step));
+        });
     }, [groupSteps, lastTerminalIndex]);
 
-    const summary = useMemo(() => {
-        const counts: Record<string, number> = {};
-        normalSteps.forEach(({ step }) => { const c = getStepConfig(step.type); counts[c.label] = (counts[c.label] || 0) + 1; });
-        return Object.entries(counts).map(([l, c]) => c > 1 ? `${c}× ${l}` : l).join(' · ');
-    }, [normalSteps]);
-
-    const first = groupSteps[0].originalIndex + 1;
-    const last = groupSteps[groupSteps.length - 1].originalIndex + 1;
+    if (visibleItems.length === 0 && !hasThinking) return null;
 
     return (
-        <>
-            {/* Render WAITING steps as prominent cards */}
-            {waitingSteps.map(({ step, originalIndex }) => (
-                <WaitingStep
-                    key={`wait-${originalIndex}`}
-                    step={step}
-                    originalIndex={originalIndex}
-                    cascadeId={cascadeId || null}
-                    onAccepted={onStepAccepted}
-                />
-            ))}
+        <Collapsible open={open} onOpenChange={setOpen} className="my-2 rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+            <CollapsibleTrigger asChild>
+                <button
+                    type="button"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left"
+                >
+                    <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 transition-transform duration-150', open && 'rotate-90')} />
+                    {hasActive ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/75 shrink-0" />
+                    ) : (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    )}
+                    <span className="font-medium truncate">
+                        {hasActive ? '正在思考与调用工具...' : `思考与执行过程（${summaryLabel}）`}
+                    </span>
+                </button>
+            </CollapsibleTrigger>
 
-            {/* Render code acknowledgements as diff cards */}
-            {codeAckSteps.map(({ step, originalIndex }) => (
-                <div key={`ack-${originalIndex}`} className="mb-3 mx-4">
-                    <CodeChangeViewer
-                        infos={step.codeAcknowledgement?.codeAcknowledgementInfos || []}
-                        isAccept={step.codeAcknowledgement?.isAccept}
-                    />
-                </div>
-            ))}
+            <CollapsibleContent>
+                <div className="border-t border-border/40 divide-y divide-border/30">
+                    {visibleItems.map(({ step, originalIndex }) => {
+                        if (step.status === 'CORTEX_STEP_STATUS_WAITING' && originalIndex > lastTerminalIndex) {
+                            return (
+                                <div key={originalIndex} className="p-2.5">
+                                    <WaitingStep
+                                        step={step}
+                                        originalIndex={originalIndex}
+                                        cascadeId={cascadeId}
+                                        onAccepted={onStepAccepted}
+                                    />
+                                </div>
+                            );
+                        }
 
-            {/* Render normal steps in collapsed group */}
-            {normalSteps.length > 0 && (
-                <div className="mb-3 mx-4">
-                    <Collapsible open={expanded} onOpenChange={setExpanded}>
-                        <CollapsibleTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                className={cn(
-                                    'w-full flex items-center justify-start gap-2.5 px-4 py-2 h-auto text-xs',
-                                    'border transition-colors',
-                                    expanded ? 'bg-muted/60 border-border/70 rounded-t-xl rounded-b-none' : 'bg-muted/40 hover:bg-muted/70 border-border/50 rounded-full'
+                        const cfg = getStepConfig(step.type);
+                        const thinkingText = step.plannerResponse?.thinking?.trim() || '';
+                        const content = extractStepContent(step);
+                        const isErr = step.status === 'CORTEX_STEP_STATUS_ERROR';
+                        const isRunning = step.status === 'CORTEX_STEP_STATUS_IN_PROGRESS' || step.status === 'CORTEX_STEP_STATUS_PENDING';
+                        const ackInfos = step.codeAcknowledgement?.codeAcknowledgementInfos;
+
+                        return (
+                            <div key={originalIndex} className="px-3 py-2 space-y-1.5 text-xs">
+                                <div className="flex items-center gap-1.5 text-muted-foreground">
+                                    <StepIcon name={cfg.icon} className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="font-medium text-foreground/85">{cfg.label}</span>
+                                    {isRunning && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground ml-1" />}
+                                    {isErr && <AlertCircle className="h-3 w-3 text-destructive ml-1" />}
+                                </div>
+
+                                {thinkingText && (
+                                    <div className="text-muted-foreground leading-relaxed whitespace-pre-wrap pl-5 max-h-[200px] overflow-y-auto">
+                                        {thinkingText}
+                                    </div>
                                 )}
-                            >
-                                <ChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform duration-200 shrink-0', expanded && 'rotate-90')} />
-                                <span className="text-muted-foreground/80"><Wrench className="h-3 w-3 text-muted-foreground/80" /></span>
-                                <span className="font-semibold text-muted-foreground">{expanded ? '收起思考与执行过程' : '思考与执行过程'} · {normalSteps.length} 步</span>
-                                <span className="text-[10px] text-muted-foreground/60 truncate flex-1 text-left font-mono">{summary}</span>
-                                <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground/60 shrink-0 hidden sm:inline-flex">#{first}{first !== last ? `–${last}` : ''}</Badge>
-                            </Button>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                            <div className="border border-t-0 border-border/60 rounded-b-xl bg-muted/20 py-1 px-1 space-y-0.5">
-                                {normalSteps.map(({ step, originalIndex }) => {
-                                    const config = getStepConfig(step.type);
-                                    const content = extractStepContent(step) || '';
-                                    return (
-                                        <div key={originalIndex} className="flex items-start gap-2 py-1.5 px-3 text-xs text-muted-foreground hover:bg-white/[0.03] rounded-md transition-colors">
-                                            <StepIcon name={config.icon} className="shrink-0 mt-0.5 text-muted-foreground/70" />
-                                            <span className="font-medium text-foreground/60 shrink-0 min-w-16">{config.label}</span>
-                                            <span className="truncate opacity-60 flex-1 min-w-0">{String(content ?? '').substring(0, 150)}</span>
-                                            <Badge variant="outline" className="text-[9px] font-mono shrink-0 opacity-50">#{originalIndex + 1}</Badge>
-                                            <RawJsonViewer step={step} />
-                                        </div>
-                                    );
-                                })}
+
+                                {content && content !== thinkingText && (
+                                    <pre className="pl-5 text-[11px] text-muted-foreground/90 font-mono whitespace-pre-wrap break-all overflow-x-auto max-h-[180px] overflow-y-auto">
+                                        {content}
+                                    </pre>
+                                )}
+
+                                {ackInfos && ackInfos.length > 0 && (
+                                    <div className="pl-5">
+                                        <CodeChangeViewer infos={ackInfos} isAccept={step.codeAcknowledgement?.isAccept} />
+                                    </div>
+                                )}
                             </div>
-                        </CollapsibleContent>
-                    </Collapsible>
+                        );
+                    })}
                 </div>
-            )}
-        </>
+            </CollapsibleContent>
+        </Collapsible>
     );
 });
+
 ProcessingGroup.displayName = 'ProcessingGroup';

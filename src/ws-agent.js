@@ -9,7 +9,7 @@
 const crypto = require('crypto');
 const sessionManager = require('./agent-session-manager');
 const { resolveLsInst } = require('./ls-utils');
-const { getEffectiveAuthKey, verifyAuthKey } = require('./auth-manager');
+const { authenticateRequest } = require('./user-manager');
 
 /**
  * Set up the agent WebSocket server.
@@ -17,19 +17,12 @@ const { getEffectiveAuthKey, verifyAuthKey } = require('./auth-manager');
  */
 function setupAgentWebSocket(agentWss) {
     agentWss.on('connection', (ws, req) => {
-        // Auth check (same pattern as ws.js)
-        if (getEffectiveAuthKey()) {
-            const ip = req.socket.remoteAddress || '';
-            const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-            if (!isLocal) {
-                const url = new URL(req.url, 'http://localhost');
-                const key = url.searchParams.get('auth_key') || '';
-                if (!verifyAuthKey(key)) {
-                    ws.close(4401, 'Unauthorized');
-                    return;
-                }
-            }
+        const user = authenticateRequest(req);
+        if (!user || user.role !== 'admin') {
+            ws.close(4401, 'Unauthorized');
+            return;
         }
+        ws._user = user;
 
         let session = null;
         console.log('[WS-Agent] New connection');

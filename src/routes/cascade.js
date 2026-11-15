@@ -6,12 +6,21 @@ const { getAutoAccept, setAutoAccept, buildAcceptPayload } = require('../cache')
 const { startCascade, sendMessage } = require('../cascade'); // startAndSend is NOT used — intentionally omitted
 const { registerCascadeInstance } = require('../poller');
 const { resolveInst } = require('./route-helpers');
+const userManager = require('../user-manager');
 
 // Security: Method whitelist to prevent arbitrary LS method invocation.
 // Generated from the extracted RPC registry — SAFE read-only methods are
 // auto-generated, mutating ones are hand-curated. Regenerate after an
 // Antigravity update: `node tools/api-tracker/gen-whitelist.js`.
 const { ALLOWED_LS_METHODS } = require('../ls-method-whitelist');
+
+function denyIfUnauthorized(req, res, cascadeId) {
+    if (req.user && !userManager.canAccessConversation(cascadeId, req.user)) {
+        res.status(403).json({ error: '无权访问该对话' });
+        return true;
+    }
+    return false;
+}
 
 module.exports = function setupCascadeRoutes(app) {
     // Create a new cascade conversation
@@ -21,6 +30,7 @@ module.exports = function setupCascadeRoutes(app) {
             if (!inst) return res.status(503).json({ error: 'No language server connected' });
             const cascadeId = await startCascade(inst);
             registerCascadeInstance(cascadeId, inst);
+            if (req.user) userManager.assignConversationOwner(cascadeId, req.user.id);
             res.json({ cascadeId });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
@@ -33,6 +43,7 @@ module.exports = function setupCascadeRoutes(app) {
             if (!cascadeId || !message) {
                 return res.status(400).json({ error: 'cascadeId and message are required' });
             }
+            if (denyIfUnauthorized(req, res, cascadeId)) return;
 
             const { hasCliConversation } = require('../cli-conversations');
             const { stepCache, ensureCached } = require('../step-cache');
@@ -43,16 +54,24 @@ module.exports = function setupCascadeRoutes(app) {
             const isCliBacked = stepCache[cascadeId]?.source === 'cli-db' || hasCliConversation(cascadeId);
 
             const continueViaCli = async () => {
+                if (req.user) userManager.assignConversationOwner(cascadeId, req.user.id);
                 broadcast({ type: 'cascade_status', conversationId: cascadeId, status: 'CASCADE_RUN_STATUS_RUNNING' }, cascadeId);
                 try {
-                    await agyManager.runAgyPrompt({
-                        prompt: message,
-                        model: modelId,
-                        modelLabel,
-                        effort,
-                        conversationId: cascadeId,
-                        workspace,
-                    });
+                    await agyManager.streamAgyPrompt(
+                        {
+                            prompt: message,
+                            model: modelId,
+                            modelLabel,
+                            effort,
+                            conversationId: cascadeId,
+                            workspace,
+                        },
+                        (ev) => {
+                            if (ev.type === 'turn_steps' || ev.type === 'thinking' || ev.type === 'tool') {
+                                broadcast({ type: 'cli_stream_event', conversationId: cascadeId, event: ev }, cascadeId);
+                            }
+                        },
+                    );
                     delete stepCache[cascadeId];
                     await ensureCached(cascadeId, inst);
                     const updated = stepCache[cascadeId];
@@ -64,7 +83,7 @@ module.exports = function setupCascadeRoutes(app) {
                         stepCount: updated ? (updated.stepCount || 0) : 0,
                         source: updated?.source || 'cli-db',
                     }, cascadeId);
-                    broadcastAll({ type: 'conversations_updated' });
+                    broadcastAll({ type: 'conversations_updated' }, req.user?.id || null);
                 } finally {
                     broadcast({ type: 'cascade_status', conversationId: cascadeId, status: 'CASCADE_RUN_STATUS_IDLE' }, cascadeId);
                 }
@@ -95,17 +114,63 @@ module.exports = function setupCascadeRoutes(app) {
     // Start a new cascade and send a message (non-blocking)
     app.post('/api/cascade/submit', async (req, res) => {
         try {
-            const { message, modelId, images, imageBase64, workspaceUri } = req.body;
+            const { message, modelId, modelLabel, effort, images, imageBase64, workspaceUri, workspace } = req.body;
             if (!message) {
                 return res.status(400).json({ error: 'message is required' });
             }
-            // Start cascade synchronously, then fire-and-forget the message.
-            // workspaceUri (a project folder file:// URI) binds the new cascade to that
-            // project so it appears under it; without it the hub creates a detached convo.
             const inst = resolveInst(req);
+            if (!inst) {
+                const agyManager = require('../agy-manager');
+                const { stepCache, ensureCached } = require('../step-cache');
+                const { broadcast, broadcastAll } = require('../ws');
+                let settled = false;
+                let initResolve;
+                const initPromise = new Promise((r) => { initResolve = r; });
+                const timer = setTimeout(() => { if (!settled) { settled = true; initResolve(null); } }, 8000);
+
+                agyManager.streamAgyPrompt(
+                    { prompt: message, model: modelId, modelLabel, effort, workspace },
+                    (ev) => {
+                        if (ev.type === 'init' && ev.sessionId && !settled) {
+                            settled = true;
+                            clearTimeout(timer);
+                            if (req.user) userManager.assignConversationOwner(ev.sessionId, req.user.id, String(message).trim().slice(0, 80));
+                            initResolve(ev.sessionId);
+                        }
+                    },
+                ).then(async (result) => {
+                    if (result.sessionId) {
+                        if (req.user) userManager.assignConversationOwner(result.sessionId, req.user.id, String(message).trim().slice(0, 80));
+                        delete stepCache[result.sessionId];
+                        await ensureCached(result.sessionId, null).catch(() => {});
+                        const updated = stepCache[result.sessionId];
+                        if (updated) {
+                            broadcast({
+                                type: 'steps_init',
+                                conversationId: result.sessionId,
+                                steps: updated.steps,
+                                baseIndex: updated.baseIndex || 0,
+                                stepCount: updated.stepCount || 0,
+                                source: updated.source || 'cli-db',
+                            }, result.sessionId);
+                        }
+                        broadcastAll({ type: 'conversations_updated' }, req.user?.id || null);
+                        broadcast({ type: 'cascade_status', conversationId: result.sessionId, status: 'CASCADE_RUN_STATUS_IDLE' }, result.sessionId);
+                    }
+                    if (!settled) { settled = true; clearTimeout(timer); initResolve(result.sessionId || null); }
+                }).catch(() => {
+                    if (!settled) { settled = true; clearTimeout(timer); initResolve(null); }
+                });
+
+                const cascadeId = await initPromise;
+                return res.json({ cascadeId, mode: 'agy-cli' });
+            }
+
+            // Start cascade synchronously, then fire-and-forget the message.
             const startOpts = workspaceUri ? { workspaceUris: [workspaceUri] } : {};
             const cascadeId = await startCascade(inst, startOpts);
             registerCascadeInstance(cascadeId, inst);
+            if (req.user) userManager.assignConversationOwner(cascadeId, req.user.id, String(message).trim().slice(0, 80));
             const opts = { modelId, inst };
             if (images && images.length > 0) {
                 opts.media = images;
@@ -119,6 +184,7 @@ module.exports = function setupCascadeRoutes(app) {
 
     // Cascade run status
     app.get('/api/cascade/:id/status', async (req, res) => {
+        if (denyIfUnauthorized(req, res, req.params.id)) return;
         try {
             const inst = resolveInst(req);
             if (!inst) return res.status(503).json({ error: 'No language server connected' });
@@ -141,6 +207,7 @@ module.exports = function setupCascadeRoutes(app) {
     app.post('/api/cascade/:id/accept', async (req, res) => {
         const { lsInstances } = require('../config');
         const cascadeId = req.params.id;
+        if (denyIfUnauthorized(req, res, cascadeId)) return;
         const isReject = !!req.body?.reject;
         // Hub model: with no tracked workspace lsInstances is empty, but the hub
         // connection still serves every cascade — fall back to it.
@@ -219,6 +286,7 @@ module.exports = function setupCascadeRoutes(app) {
     // hardcoding buttons. Returns { kind, ... } or { kind:null } when no gate is pending.
     app.get('/api/cascade/:id/gate', async (req, res) => {
         const cascadeId = req.params.id;
+        if (denyIfUnauthorized(req, res, cascadeId)) return;
         try {
             const { lsInstances } = require('../config');
             let instances = lsInstances;
@@ -252,8 +320,12 @@ module.exports = function setupCascadeRoutes(app) {
 
     // Cancel active cascade invocation
     app.post('/api/cascade/:id/cancel', async (req, res) => {
+        if (denyIfUnauthorized(req, res, req.params.id)) return;
         try {
             const inst = resolveInst(req);
+            if (!inst) {
+                return res.json({ cancelled: false, mode: 'cli' });
+            }
             const result = await callApi('CancelCascadeInvocation', {
                 cascadeId: req.params.id,
             }, inst);
@@ -273,6 +345,7 @@ module.exports = function setupCascadeRoutes(app) {
 
     // Token usage / generator metadata
     app.get('/api/cascade/:id/metadata', async (req, res) => {
+        if (denyIfUnauthorized(req, res, req.params.id)) return;
         try {
             const inst = resolveInst(req);
             if (!inst) return res.status(503).json({ error: 'No language server connected' });
@@ -286,7 +359,9 @@ module.exports = function setupCascadeRoutes(app) {
     app.get('/api/user/profile', async (req, res) => {
         try {
             const inst = resolveInst(req);
-            if (!inst) return res.status(503).json({ error: 'IDE not connected' });
+            if (!inst) {
+                return res.json({ user: req.user || {}, profilePicture: null, mode: 'cli' });
+            }
             const [status, profile] = await Promise.all([
                 callApi('GetUserStatus', {}, inst),
                 callApi('GetProfileData', {}, inst)
@@ -298,13 +373,26 @@ module.exports = function setupCascadeRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // Delete a cascade conversation
+    // Delete a cascade conversation (works across both LS and local CLI SQLite DB)
     app.delete('/api/cascade/:id', async (req, res) => {
+        const cascadeId = req.params.id;
+        if (denyIfUnauthorized(req, res, cascadeId)) return;
         try {
-            await callApi('DeleteCascadeTrajectory', { cascadeId: req.params.id }, resolveInst(req));
+            const inst = resolveInst(req);
+            if (inst) {
+                try {
+                    await callApi('DeleteCascadeTrajectory', { cascadeId }, inst);
+                } catch { /* ignore if not present on LS */ }
+            }
+            const { deleteCliConversation } = require('../cli-conversations');
+            const cliRemoved = deleteCliConversation(cascadeId);
+            userManager.removeConversationMeta(cascadeId);
             const { cleanupCascade } = require('../cleanup');
-            cleanupCascade(req.params.id);
-            res.json({ success: true });
+            cleanupCascade(cascadeId);
+            try {
+                require('../ws').broadcastAll({ type: 'conversations_updated' }, req.user?.id || null);
+            } catch { /* ignore */ }
+            res.json({ success: true, id: cascadeId, cliRemoved });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 

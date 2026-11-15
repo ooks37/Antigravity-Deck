@@ -4,7 +4,6 @@ import { Step } from '@/lib/types';
 import { extractStepContent } from '@/lib/step-utils';
 import { MarkdownRenderer } from '../markdown-renderer';
 import { useCopy } from './chat-helpers';
-import { RawJsonViewer } from './raw-json-viewer';
 import { Button } from '@/components/ui/button';
 import { Copy, Check } from 'lucide-react';
 export const UserMessage = memo(function UserMessage({ step, index }: { step: Step; index: number }) {
@@ -57,13 +56,13 @@ export const UserMessage = memo(function UserMessage({ step, index }: { step: St
                 )}
 
                 {content && <div className="text-sm leading-relaxed"><MarkdownRenderer content={content} /></div>}
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <RawJsonViewer step={step} />
+                <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-5 w-5 text-muted-foreground/50 hover:text-foreground"
+                        className="h-6 w-6 text-muted-foreground/60 hover:text-foreground"
                         onClick={(e) => copy(content, e)}
+                        title="复制消息"
                     >
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                     </Button>

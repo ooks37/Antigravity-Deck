@@ -44,8 +44,8 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
+      connectSrc: ["'self'", 'ws:', 'wss:'],
+      fontSrc: ["'self'", 'data:'],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"],
@@ -199,36 +199,66 @@ app.get('/api/ws-url', (req, res) => {
   res.json({ wsPort: Number(process.env.PORT || 3500) });
 });
 
-// Auth middleware — dynamic key via auth-manager (.auth-key + AUTH_KEY)
-const { getEffectiveAuthKey, verifyAuthKey, syncStartupAuthKey } = require('./src/auth-manager');
-const startupAuthKey = syncStartupAuthKey();
-if (startupAuthKey) {
-  console.log(`  🔒 Auth enabled (key length: ${startupAuthKey.length})`);
-} else {
-  console.log('  ⚠️  No AUTH_KEY set — API is open (safe for local dev)');
-}
+// Multi-user Auth Middleware — backed by src/user-manager.js (SQLite scrypt + session token)
+const { syncStartupAuthKey } = require('./src/auth-manager');
+syncStartupAuthKey();
+const userManager = require('./src/user-manager');
+userManager.getDb();
+
+const PUBLIC_API_PATHS = new Set(['/ws-url', '/status', '/auth/me', '/auth/login', '/auth/logout']);
+const ADMIN_ONLY_PREFIXES = [
+  '/users',
+  '/settings',
+  '/permissions',
+  '/proxy',
+  '/profiles',
+  '/accounts',
+  '/fleet',
+  '/launch-ide',
+  '/ide',
+  '/kill-ide',
+  '/agy/update',
+  '/logs',
+  '/system',
+  '/agent-bridge',
+  '/agent-api',
+  '/orchestrator',
+  '/file',
+  '/files',
+  '/git',
+  '/ls',
+];
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '登录尝试次数过多，请 15 分钟后再试' },
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || ipKeyGenerator(req),
+  skipSuccessfulRequests: true,
+});
+
+app.use('/api/auth/login', loginLimiter);
 
 app.use('/api', (req, res, next) => {
-  if (!getEffectiveAuthKey()) return next();
-  // Skip auth for public endpoints
-  if (req.path === '/ws-url' || req.path === '/status') {
-    return next();
+  if (PUBLIC_API_PATHS.has(req.path)) return next();
+
+  const user = userManager.authenticateRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: '未登录或会话已失效，请重新登录' });
   }
+  req.user = user;
 
-  // Localhost bypass only if explicitly enabled (disabled by default for security)
-  const ip = req.ip || req.socket.remoteAddress || '';
-  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-  const allowLocalBypass = process.env.ALLOW_LOCALHOST_BYPASS === 'true';
-  if (isLocal && allowLocalBypass) return next();
-
-  const key = req.headers['x-auth-key'] || req.query.auth_key;
-  if (!verifyAuthKey(typeof key === 'string' ? key : '')) {
-    return res.status(401).json({ error: 'Unauthorized — invalid or missing auth key' });
+  const isAdminRoute = ADMIN_ONLY_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))
+    || (req.path === '/workspaces' && req.method !== 'GET');
+  if (isAdminRoute && user.role !== 'admin') {
+    return res.status(403).json({ error: '仅管理员可执行此操作' });
   }
   next();
 });
 
-// Apply strict rate limiter to sensitive operations
+// Apply rate limiter to sensitive operations
 app.use('/api/settings', strictLimiter);
 app.use('/api/auth/password', strictLimiter);
 app.use('/api/permissions', strictLimiter);
@@ -239,6 +269,30 @@ app.use('/api/agy/update', strictLimiter);
 
 // Routes & WebSocket
 setupRoutes(app);
+
+// Static Frontend Hosting (Next.js static export in frontend/out -> eliminates separate Next server)
+const FRONTEND_OUT_DIR = path.join(__dirname, 'frontend', 'out');
+if (fs.existsSync(FRONTEND_OUT_DIR)) {
+  app.use(express.static(FRONTEND_OUT_DIR, {
+    index: false,
+    maxAge: '1h',
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
+  }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+    const indexHtml = path.join(FRONTEND_OUT_DIR, 'index.html');
+    if (fs.existsSync(indexHtml)) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.sendFile(indexHtml);
+    }
+    return next();
+  });
+}
+
 setupWebSocket(wss);
 
 // Agent WebSocket — external AI agent protocol at /ws/agent
@@ -263,8 +317,10 @@ sessionManager.configure({
 logger.connect(require('./src/ws').broadcastToGlobal);
 
 // Start
+const IDE_HUB_ENABLED = process.env.ENABLE_IDE_HUB === 'true' || process.argv.includes('--with-ide');
+
 server.listen(PORT, async () => {
-  console.log(`\n  💬 Antigravity Deck (API) running at http://localhost:${PORT}\n`);
+  console.log(`\n  💬 Antigravity Deck running at http://localhost:${PORT} (mode=${IDE_HUB_ENABLED ? 'ide+cli' : 'lightweight-cli'})\n`);
   // Initialize Web Push VAPID keys
   try {
     const { initVapid } = require('./src/push-service');
@@ -272,12 +328,16 @@ server.listen(PORT, async () => {
   } catch (e) {
     console.warn('  ⚠️  Push service init failed:', e.message);
   }
-  await init(() => startPolling());
-  const { startResourceMonitor } = require('./src/resource-monitor');
-  startResourceMonitor();
-  startAutoRescan();
-  // Subscribe to the hub's Jetbox streams for the FULL conversation history + projects
-  try { require('./src/jetbox').start(); } catch (e) { console.warn('  ⚠️  Jetbox start failed:', e.message); }
+
+  if (IDE_HUB_ENABLED) {
+    await init(() => startPolling());
+    const { startResourceMonitor } = require('./src/resource-monitor');
+    startResourceMonitor();
+    startAutoRescan();
+    try { require('./src/jetbox').start(); } catch (e) { console.warn('  ⚠️  Jetbox start failed:', e.message); }
+  } else {
+    console.log('  🪶 Lightweight CLI mode active (IDE hub & background LS pollers disabled)');
+  }
 
   // Auto-start Agent Bridge if configured in settings.json
   const { getSettings } = require('./src/config');

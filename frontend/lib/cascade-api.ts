@@ -1,6 +1,6 @@
 // === Cascade API Client ===
 import { API_BASE } from './config';
-import { authHeaders } from './auth';
+import { authHeaders, authFetch } from './auth';
 import type { Step } from './types';
 
 export interface Workspace {
@@ -480,9 +480,9 @@ export interface ProfileListResponse {
 }
 
 async function apiJson<T>(url: string, init?: RequestInit, fallbackErr = '请求失败'): Promise<T> {
-    const res = await fetch(url, {
+    const res = await authFetch(url, {
         ...init,
-        headers: { ...authHeaders(), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers || {}) },
+        headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers as Record<string, string> | undefined || {}) },
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `${fallbackErr}: ${res.status}`);
@@ -981,6 +981,193 @@ export async function getIdeRuntimeStatus(): Promise<IdeRuntimeStatus> {
 export async function restartIdeService(): Promise<{ restarted: boolean; managedBy: string; platform: string }> {
     return apiJson(`${API_BASE}/api/ide/restart`, { method: 'POST' }, '重启 Antigravity 服务失败');
 }
+
+// === Multi-User Auth & User Administration ===
+export interface UserProfile {
+    id: string;
+    username: string;
+    displayName: string;
+    role: 'admin' | 'member';
+    disabled?: boolean;
+    conversationCount?: number;
+    createdAt?: string;
+    updatedAt?: string;
+    isNoAuth?: boolean;
+}
+
+export interface AuthMeResponse {
+    authEnabled: boolean;
+    multiUser: boolean;
+    authenticated: boolean;
+    user: UserProfile | null;
+}
+
+export async function fetchAuthMe(): Promise<AuthMeResponse> {
+    return apiJson<AuthMeResponse>(`${API_BASE}/api/auth/me`, undefined, '获取登录状态失败');
+}
+
+export async function authLogin(username: string, password: string): Promise<{ user: UserProfile; token: string; expiresAt: string }> {
+    return apiJson(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+    }, '登录失败');
+}
+
+export async function authLogout(): Promise<{ success: boolean }> {
+    return apiJson(`${API_BASE}/api/auth/logout`, { method: 'POST' }, '退出登录失败');
+}
+
+export async function changeOwnCredentials(payload: {
+    currentPassword?: string;
+    newPassword?: string;
+    newUsername?: string;
+    displayName?: string;
+}): Promise<{ updated: boolean; user: UserProfile }> {
+    return apiJson(`${API_BASE}/api/auth/password`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '更新账号信息失败');
+}
+
+export async function listUsers(): Promise<{ users: UserProfile[] }> {
+    return apiJson(`${API_BASE}/api/users`, undefined, '获取成员列表失败');
+}
+
+export async function createUserAccount(payload: {
+    username: string;
+    password: string;
+    displayName?: string;
+    role?: 'admin' | 'member';
+}): Promise<{ user: UserProfile }> {
+    return apiJson(`${API_BASE}/api/users`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '创建成员失败');
+}
+
+export async function updateUserAccount(
+    id: string,
+    payload: { displayName?: string; password?: string; disabled?: boolean; role?: 'admin' | 'member' },
+): Promise<{ user: UserProfile }> {
+    return apiJson(`${API_BASE}/api/users/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+    }, '更新成员失败');
+}
+
+export async function deleteUserAccount(id: string): Promise<{ deleted: boolean; id: string }> {
+    return apiJson(`${API_BASE}/api/users/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+    }, '删除成员失败');
+}
+
+// === Real-Time Streaming agy Chat (SSE) ===
+export interface AgyStreamEventHandlers {
+    onInit?: (data: { sessionId: string; model?: string | null; effort?: string | null }) => void;
+    onStatus?: (data: { phase: string; elapsedMs?: number }) => void;
+    onThinking?: (data: { text: string; elapsedMs?: number }) => void;
+    onTool?: (data: { name: string; status: string; info?: unknown; elapsedMs?: number }) => void;
+    onTurnSteps?: (data: { sessionId: string; baseIndex: number; steps: Step[]; totalSteps: number }) => void;
+    onTextDelta?: (data: { text: string; fullText?: string }) => void;
+    onStepsSync?: (data: { sessionId: string; steps: Step[]; stepCount: number }) => void;
+    onDone?: (data: { sessionId?: string | null; model?: string | null; effort?: string | null; text?: string }) => void;
+    onError?: (error: string) => void;
+}
+
+export async function streamAgyChat(
+    payload: {
+        prompt: string;
+        model?: string;
+        modelLabel?: string;
+        effort?: string;
+        conversationId?: string;
+        workspace?: string;
+    },
+    handlers: AgyStreamEventHandlers,
+    signal?: AbortSignal,
+): Promise<{ sessionId?: string | null; text?: string }> {
+    const res = await authFetch(`${API_BASE}/api/agy/stream`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `发送失败 (${res.status})`);
+    }
+    if (!res.body) {
+        throw new Error('浏览器不支持流式响应');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let finalSessionId: string | null = null;
+    let finalText = '';
+
+    const dispatchBlock = (block: string) => {
+        if (!block.trim()) return;
+        let eventName = 'message';
+        const dataLines: string[] = [];
+        for (const rawLine of block.split(/\r?\n/)) {
+            const line = rawLine.trimEnd();
+            if (!line || line.startsWith(':')) continue;
+            if (line.startsWith('event:')) {
+                eventName = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+                dataLines.push(line.slice(5).trim());
+            }
+        }
+        if (!dataLines.length) return;
+        let data: Record<string, unknown>;
+        try {
+            data = JSON.parse(dataLines.join('\n'));
+        } catch {
+            return;
+        }
+        const ev = (typeof data.type === 'string' && eventName === 'message') ? data.type : eventName;
+        if (ev === 'init') {
+            if (typeof data.sessionId === 'string') finalSessionId = data.sessionId;
+            handlers.onInit?.(data as { sessionId: string; model?: string | null; effort?: string | null });
+        } else if (ev === 'status') {
+            handlers.onStatus?.(data as { phase: string; elapsedMs?: number });
+        } else if (ev === 'thinking') {
+            handlers.onThinking?.(data as { text: string; elapsedMs?: number });
+        } else if (ev === 'tool') {
+            handlers.onTool?.(data as { name: string; status: string; info?: unknown; elapsedMs?: number });
+        } else if (ev === 'turn_steps') {
+            handlers.onTurnSteps?.(data as { sessionId: string; baseIndex: number; steps: Step[]; totalSteps: number });
+        } else if (ev === 'text_delta') {
+            if (typeof data.fullText === 'string') finalText = data.fullText;
+            else if (typeof data.text === 'string') finalText += data.text;
+            handlers.onTextDelta?.(data as { text: string; fullText?: string });
+        } else if (ev === 'steps_sync') {
+            handlers.onStepsSync?.(data as { sessionId: string; steps: Step[]; stepCount: number });
+        } else if (ev === 'done') {
+            if (typeof data.sessionId === 'string') finalSessionId = data.sessionId;
+            if (typeof data.text === 'string') finalText = data.text;
+            handlers.onDone?.(data as { sessionId?: string | null; model?: string | null; effort?: string | null; text?: string });
+        } else if (ev === 'error') {
+            const msg = typeof data.error === 'string' ? data.error : '生成失败';
+            handlers.onError?.(msg);
+            throw new Error(msg);
+        }
+    };
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n\r?\n/);
+        buffer = parts.pop() || '';
+        for (const block of parts) dispatchBlock(block);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) dispatchBlock(buffer);
+
+    return { sessionId: finalSessionId, text: finalText };
+}
+
 
 
 

@@ -3,10 +3,13 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Step } from '@/lib/types';
 import { extractStepContent, getStepConfig } from '@/lib/step-utils';
-import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows, getSettings, updatePermissionsConfig, getPermissionsConfig, uploadWorkspaceFile, rotateOAuthAccount, runAgyQuick } from '@/lib/cascade-api';
-import type { Workspace, CascadeModel, CascadeModelGroup, ActiveModelAccount, MediaItem, WorkflowItem, FleetServer, UploadedFileResult } from '@/lib/cascade-api';
+import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows, updatePermissionsConfig, getPermissionsConfig, uploadWorkspaceFile, rotateOAuthAccount, streamAgyChat } from '@/lib/cascade-api';
+import type { Workspace, CascadeModel, CascadeModelGroup, ActiveModelAccount, MediaItem, WorkflowItem, UploadedFileResult } from '@/lib/cascade-api';
 import { API_BASE } from '@/lib/config';
-import { authHeaders } from '@/lib/auth';
+import { authFetch } from '@/lib/auth';
+import { useAuthUser } from '@/components/auth-gate';
+import { MarkdownRenderer } from './markdown-renderer';
+import { ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
@@ -40,6 +43,8 @@ interface ChatViewProps {
     wsVersion: number;
     cascadeStatus?: string;
     onCascadeCreated: (cascadeId: string) => void;
+    onHydrateConversation?: (cascadeId: string, steps: Step[], stepCount?: number) => void;
+    onConversationsUpdated?: () => void;
     onNewConversation: () => void;
     showTimeline: boolean;
     onSetShowTimeline: (val: boolean) => void;
@@ -48,8 +53,6 @@ interface ChatViewProps {
     onExport: () => void;
     onShowSettings?: () => void;
     detected?: boolean;
-    targetServer?: FleetServer | null;
-    onClearTargetServer?: () => void;
     prefillPrompt?: { text: string; seq: number } | null;
     activeAccountLabel?: string | null;
     onOpenAccounts?: () => void;
@@ -110,6 +113,8 @@ export function ChatView({
     wsVersion,
     cascadeStatus,
     onCascadeCreated,
+    onHydrateConversation,
+    onConversationsUpdated,
     onNewConversation,
     showTimeline,
     onSetShowTimeline,
@@ -118,14 +123,14 @@ export function ChatView({
     onExport,
     onShowSettings,
     detected = true,
-    targetServer,
-    onClearTargetServer,
     prefillPrompt,
     activeAccountLabel,
     onOpenAccounts,
     stepsLoading = false,
     convNotFound = false,
 }: ChatViewProps) {
+    const { user } = useAuthUser();
+    const isAdmin = user?.role === 'admin';
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     // activeCascadeId: derived from currentConvId, with local override for new chats
@@ -224,9 +229,23 @@ export function ChatView({
     const [uploadNotice, setUploadNotice] = useState<string | null>(null);
     const [pendingMessage, setPendingMessage] = useState<string | null>(null);
     const [isDragOver, setIsDragOver] = useState(false);
-    // Quick agy CLI mode + inline CLI responses + account rotate state
+    // Quick agy CLI mode + real-time streaming turns + account rotate state
     const [useAgyCli, setUseAgyCli] = useState(false);
-    const [cliTurns, setCliTurns] = useState<Array<{ id: string; prompt: string; reply: string | null; error?: string | null; pending?: boolean }>>([]);
+    const [liveTurns, setLiveTurns] = useState<Array<{
+        id: string;
+        prompt: string;
+        phase: 'thinking' | 'tool' | 'answering' | 'done' | 'error';
+        thinking: string;
+        showThinking: boolean;
+        tools: Array<{ name: string; status: string }>;
+        reply: string;
+        error?: string | null;
+        startedAt: number;
+        elapsedMs: number;
+        pending: boolean;
+    }>>([]);
+    const streamAbortRef = useRef<AbortController | null>(null);
+    const activeStreamConvIdRef = useRef<string | null>(null);
     const [rotatingAccount, setRotatingAccount] = useState(false);
     // Workflow autocomplete state
     const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
@@ -354,7 +373,11 @@ export function ChatView({
     const modelInitRef = useRef(false);
     useEffect(() => {
         const fetchModels = modelInitRef.current ? Promise.resolve(null) : getModels();
-        Promise.all([getWorkspaces(), fetchModels, fetch(`${API_BASE}/api/settings`, { headers: authHeaders() }).then(r => r.json()).catch(() => null)])
+        Promise.all([
+            isAdmin ? getWorkspaces().catch(() => []) : Promise.resolve([]),
+            fetchModels,
+            isAdmin ? authFetch(`${API_BASE}/api/settings`).then(r => (r.ok ? r.json() : null)).catch(() => null) : Promise.resolve(null),
+        ])
             .then(([ws, modelsResp, settingsResp]) => {
                 setWorkspaces(ws);
                 if (currentWorkspace !== null) {
@@ -368,17 +391,18 @@ export function ChatView({
                 }
             })
             .catch(() => { });
-        // Load auto-accept + smart guard policy from backend
-        getAutoAcceptState().then(s => setAutoAccept(s.enabled)).catch(() => { });
-        getPermissionsConfig().then(p => {
-            setAutoAccept(p.autoAccept);
-            if (p.autoAcceptPolicy === 'full' || p.autoAcceptPolicy === 'smart') {
-                setAutoAcceptPolicy(p.autoAcceptPolicy);
-            }
-        }).catch(() => { });
+        if (isAdmin) {
+            getAutoAcceptState().then(s => setAutoAccept(s.enabled)).catch(() => { });
+            getPermissionsConfig().then(p => {
+                setAutoAccept(p.autoAccept);
+                if (p.autoAcceptPolicy === 'full' || p.autoAcceptPolicy === 'smart') {
+                    setAutoAcceptPolicy(p.autoAcceptPolicy);
+                }
+            }).catch(() => { });
+        }
         // Load workflows
         fetchWorkflows(currentWorkspace || undefined).then(setWorkflows).catch(() => { });
-    }, [wsVersion, currentWorkspace]);
+    }, [wsVersion, currentWorkspace, isAdmin]);
 
     // Refresh models & tier info automatically when OAuth account swaps or LS reconnects
     useEffect(() => {
@@ -397,7 +421,7 @@ export function ChatView({
         };
     }, []);
 
-    // Apply prefilled prompt from sidebar fleet or quick actions
+    // Apply prefilled prompt from quick actions
     useEffect(() => {
         if (prefillPrompt?.text) {
             setInput(prefillPrompt.text);
@@ -405,8 +429,13 @@ export function ChatView({
         }
     }, [prefillPrompt]);
 
-    // Reset localCascadeId when currentConvId changes
-    useEffect(() => { setLocalCascadeId(null); }, [currentConvId]);
+    // Reset localCascadeId when switching to another conversation (preserve active SSE stream turn)
+    useEffect(() => {
+        setLocalCascadeId(null);
+        if (currentConvId !== activeStreamConvIdRef.current) {
+            setLiveTurns((prev) => prev.filter((t) => t.pending));
+        }
+    }, [currentConvId]);
 
     // Scroll to bottom when entering/switching conversations
     useEffect(() => {
@@ -465,41 +494,138 @@ export function ChatView({
         if ((!rawText && pendingImages.length === 0 && pendingFiles.length === 0) || sending) return;
 
         let text = rawText;
-        if (targetServer && !activeCascadeId && !text.includes(targetServer.ip) && !text.includes(targetServer.id)) {
-            text = `[目标服务器: ${targetServer.id} (${targetServer.name} · ${targetServer.ip}${targetServer.combo ? ` · ${targetServer.combo}` : ''})]\n${text}`;
-        }
         if (pendingFiles.length > 0) {
             const refs = pendingFiles.map((f) => `- ${f.originalName} -> ${f.path}`).join('\n');
             text = `${text ? `${text}\n\n` : ''}[已上传文件到工作区]\n${refs}`;
         }
 
-        // Direct agy CLI mode or LS offline fallback
+        // Real-time SSE streaming via agy CLI (default mode when Hub IDE is disabled/offline, or toggled)
         if (useAgyCli || !detected) {
             const turnId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const startedAt = Date.now();
+            const controller = new AbortController();
+            streamAbortRef.current = controller;
+            activeStreamConvIdRef.current = activeCascadeId || null;
+
             setSending(true);
             setInput('');
             setPendingFiles([]);
             setPendingImages([]);
-            setCliTurns((prev) => [...prev, { id: turnId, prompt: text, reply: null, pending: true }]);
+            setLiveTurns((prev) => [
+                ...prev,
+                {
+                    id: turnId,
+                    prompt: text,
+                    phase: 'thinking',
+                    thinking: '',
+                    showThinking: true,
+                    tools: [],
+                    reply: '',
+                    error: null,
+                    startedAt,
+                    elapsedMs: 0,
+                    pending: true,
+                },
+            ]);
+
+            const elapsedTimer = setInterval(() => {
+                setLiveTurns((prev) =>
+                    prev.map((t) => (t.id === turnId && t.pending ? { ...t, elapsedMs: Date.now() - t.startedAt } : t)),
+                );
+            }, 250);
+
+            let syncedFromDb = false;
             try {
                 const normEffort = normalizeEffortKey(selectedEffort);
                 const apiEffort = (normEffort === 'low' || normEffort === 'medium' || normEffort === 'high' || normEffort === 'xhigh' || normEffort === 'max') ? normEffort : undefined;
                 const selectedLabel = models.find((m) => m.modelId === selectedModel)?.label;
-                const res = await runAgyQuick({
-                    prompt: text,
-                    model: selectedModel || undefined,
-                    modelLabel: selectedLabel,
-                    effort: apiEffort,
-                    conversationId: activeCascadeId || undefined,
-                    workspace: currentWorkspace || undefined,
-                });
-                setCliTurns((prev) => prev.map((t) => (t.id === turnId
-                    ? { ...t, pending: false, reply: res.text || '', error: res.success ? null : (res.error || 'agy 执行失败') }
-                    : t)));
+
+                await streamAgyChat(
+                    {
+                        prompt: text,
+                        model: selectedModel || undefined,
+                        modelLabel: selectedLabel,
+                        effort: apiEffort,
+                        conversationId: activeCascadeId || undefined,
+                        workspace: currentWorkspace || undefined,
+                    },
+                    {
+                        onInit: (ev) => {
+                            if (ev.sessionId) {
+                                activeStreamConvIdRef.current = ev.sessionId;
+                                setLocalCascadeId(ev.sessionId);
+                                if (!activeCascadeId) onCascadeCreated(ev.sessionId);
+                            }
+                        },
+                        onStatus: (ev) => {
+                            const nextPhase = ev.phase === 'tool' || ev.phase === 'answering' ? ev.phase : 'thinking';
+                            setLiveTurns((prev) =>
+                                prev.map((t) => (t.id === turnId ? { ...t, phase: nextPhase, elapsedMs: ev.elapsedMs ?? (Date.now() - t.startedAt) } : t)),
+                            );
+                        },
+                        onThinking: (ev) => {
+                            setLiveTurns((prev) =>
+                                prev.map((t) => (t.id === turnId ? { ...t, thinking: ev.text, elapsedMs: ev.elapsedMs ?? (Date.now() - t.startedAt) } : t)),
+                            );
+                        },
+                        onTool: (ev) => {
+                            setLiveTurns((prev) =>
+                                prev.map((t) => {
+                                    if (t.id !== turnId) return t;
+                                    const nextTools = [...t.tools];
+                                    const existingIdx = nextTools.findIndex((item) => item.name === ev.name && item.status !== 'DONE');
+                                    if (existingIdx >= 0) nextTools[existingIdx] = { name: ev.name, status: ev.status };
+                                    else nextTools.push({ name: ev.name, status: ev.status });
+                                    return { ...t, phase: 'tool', tools: nextTools };
+                                }),
+                            );
+                        },
+                        onTextDelta: (ev) => {
+                            setLiveTurns((prev) =>
+                                prev.map((t) => (t.id === turnId ? { ...t, phase: 'answering', showThinking: false, reply: ev.fullText ?? (t.reply + ev.text) } : t)),
+                            );
+                        },
+                        onStepsSync: (ev) => {
+                            if (ev.sessionId && Array.isArray(ev.steps) && ev.steps.length > 0 && onHydrateConversation) {
+                                syncedFromDb = true;
+                                onHydrateConversation(ev.sessionId, ev.steps, ev.stepCount);
+                                setLiveTurns((prev) => prev.filter((t) => t.id !== turnId));
+                            }
+                        },
+                        onDone: (ev) => {
+                            if (!syncedFromDb) {
+                                setLiveTurns((prev) =>
+                                    prev.map((t) =>
+                                        t.id === turnId
+                                            ? {
+                                                ...t,
+                                                phase: 'done',
+                                                pending: false,
+                                                reply: ev.text || t.reply,
+                                                elapsedMs: Date.now() - t.startedAt,
+                                            }
+                                            : t,
+                                    ),
+                                );
+                            }
+                        },
+                    },
+                    controller.signal,
+                );
+                onConversationsUpdated?.();
             } catch (e) {
-                const msg = e instanceof Error ? e.message : 'agy 执行失败';
-                setCliTurns((prev) => prev.map((t) => (t.id === turnId ? { ...t, pending: false, error: msg } : t)));
+                const isAbort = e instanceof Error && e.name === 'AbortError';
+                const msg = isAbort ? '已停止生成' : (e instanceof Error ? e.message : '执行失败');
+                setLiveTurns((prev) =>
+                    prev.map((t) =>
+                        t.id === turnId
+                            ? { ...t, pending: false, phase: 'error', error: isAbort && t.reply ? null : msg, elapsedMs: Date.now() - t.startedAt }
+                            : t,
+                    ),
+                );
             } finally {
+                clearInterval(elapsedTimer);
+                streamAbortRef.current = null;
                 setSending(false);
             }
             return;
@@ -514,15 +640,13 @@ export function ChatView({
             // Build media array from pending images
             let mediaItems: MediaItem[] | undefined;
             if (pendingImages.length > 0) {
-                // Generate thumbnails and save each image via SaveMediaAsArtifact
                 mediaItems = await Promise.all(pendingImages.map(async (img) => {
                     const thumbnail = await generateThumbnail(img.base64, img.mimeType);
-                    // Try to save via SaveMediaAsArtifact to get a uri
                     let uri: string | undefined;
                     try {
                         const saved = await saveMedia(img.mimeType, img.base64, thumbnail);
                         uri = saved.uri;
-                    } catch { /* uri is optional, continue without it */ }
+                    } catch { /* uri is optional */ }
                     return {
                         mimeType: img.mimeType,
                         inlineData: img.base64,
@@ -555,7 +679,7 @@ export function ChatView({
         } finally {
             setSending(false);
         }
-    }, [input, sending, activeCascadeId, selectedModel, models, pendingImages, pendingFiles, targetServer, useAgyCli, detected, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
+    }, [input, sending, activeCascadeId, selectedModel, selectedEffort, models, pendingImages, pendingFiles, useAgyCli, detected, currentWorkspace, newChatWorkspaceUri, onCascadeCreated, onHydrateConversation, onConversationsUpdated]);
 
     // Image handling — shared processor for adding files to pending images
     const processImageFile = useCallback((file: File) => {
@@ -637,11 +761,16 @@ export function ChatView({
         if (fileInputRef.current) fileInputRef.current.value = '';
     }, []);
 
-    // Cancel
+    // Cancel active SSE stream or LS cascade
     const handleCancel = useCallback(async () => {
-        if (!activeCascadeId) return;
-        try { await cascadeCancel(activeCascadeId); } catch (e) { console.error('Cancel error:', e); }
-    }, [activeCascadeId]);
+        if (streamAbortRef.current) {
+            streamAbortRef.current.abort();
+            streamAbortRef.current = null;
+        }
+        if (activeCascadeId && detected) {
+            try { await cascadeCancel(activeCascadeId); } catch (e) { console.error('Cancel error:', e); }
+        }
+    }, [activeCascadeId, detected]);
 
     // Accept/Reject interaction
     const handleInteract = useCallback(async (action: 'accept' | 'reject') => {
@@ -652,9 +781,14 @@ export function ChatView({
 
     // New chat
     const handleNewChat = useCallback(() => {
+        if (streamAbortRef.current) {
+            streamAbortRef.current.abort();
+            streamAbortRef.current = null;
+        }
+        activeStreamConvIdRef.current = null;
         setLocalCascadeId(null);
         setInput('');
-        setCliTurns([]);
+        setLiveTurns([]);
         onNewConversation();
     }, [onNewConversation]);
 
@@ -733,7 +867,8 @@ export function ChatView({
         return last;
     }, [displaySteps]);
 
-    const isRunning = cascadeStatus === 'CASCADE_RUN_STATUS_RUNNING';
+    const isStreamingCli = liveTurns.some((t) => t.pending);
+    const isRunning = cascadeStatus === 'CASCADE_RUN_STATUS_RUNNING' || isStreamingCli;
     const isWaiting = cascadeStatus === 'CASCADE_RUN_STATUS_WAITING_FOR_USER';
     const isActive = isRunning || isWaiting;
 
@@ -831,7 +966,7 @@ export function ChatView({
                     )}
                     {/* Chat messages */}
                     <div ref={containerRef} onScroll={handleScroll} className="relative flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-5">
-                        {displaySteps.length === 0 && cliTurns.length === 0 ? (
+                        {displaySteps.length === 0 && liveTurns.length === 0 ? (
                             currentConvId ? (
                                 <div className="flex items-center justify-center h-full">
                                     {stepsLoading ? (
@@ -852,9 +987,7 @@ export function ChatView({
                                 </div>
                             ) : (
                                 <DoubaoWelcome
-                                    targetServer={targetServer}
-                                    onClearTargetServer={onClearTargetServer}
-                                    activeAccountLabel={activeAccountLabel}
+                                    activeAccountLabel={isAdmin ? activeAccountLabel : null}
                                     onPickPrompt={(prompt) => {
                                         setInput(prompt);
                                         setTimeout(() => inputRef.current?.focus(), 40);
@@ -895,32 +1028,87 @@ export function ChatView({
                                     }
                                     return <div key={`p-${gIdx}`} className={animClass}><ProcessingGroup steps={group.steps} cascadeId={activeCascadeId} lastTerminalIndex={lastTerminalIndex} /></div>;
                                 })}
-                                {cliTurns.map((turn) => (
+                                {liveTurns.map((turn) => (
                                     <div key={turn.id} className="space-y-3 my-3">
                                         <div className="flex justify-end">
                                             <div className="max-w-[82%] rounded-2xl rounded-tr-sm px-4 py-2.5 bg-primary/10 border border-primary/15 text-sm whitespace-pre-wrap">
                                                 {turn.prompt}
                                             </div>
                                         </div>
-                                        <div className="flex justify-start">
-                                            <div className="max-w-[92%] rounded-2xl rounded-tl-sm px-4 py-3 bg-card border border-border/60 text-sm space-y-1.5">
-                                                <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                                                    <Terminal className="h-3 w-3 text-amber-500" /> agy CLI 直连输出
+                                        <div className="my-2 space-y-2">
+                                            {(turn.pending || turn.thinking || turn.tools.length > 0) && (
+                                                <div className="rounded-xl border border-border/60 bg-muted/25 overflow-hidden">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setLiveTurns((prev) =>
+                                                                prev.map((item) => (item.id === turn.id ? { ...item, showThinking: !item.showThinking } : item)),
+                                                            )
+                                                        }
+                                                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left"
+                                                    >
+                                                        {turn.pending ? (
+                                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/75 shrink-0" />
+                                                        ) : turn.showThinking ? (
+                                                            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                                                        ) : (
+                                                            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                                                        )}
+                                                        <span className="font-medium">
+                                                            {turn.pending
+                                                                ? (turn.phase === 'tool'
+                                                                    ? `正在执行工具 (${(turn.elapsedMs / 1000).toFixed(1)}s)`
+                                                                    : turn.phase === 'answering'
+                                                                        ? `正在输出回复 (${(turn.elapsedMs / 1000).toFixed(1)}s)`
+                                                                        : `正在深度思考 (${(turn.elapsedMs / 1000).toFixed(1)}s)`)
+                                                                : `已思考并处理 (${(turn.elapsedMs / 1000).toFixed(1)}s)`}
+                                                        </span>
+                                                        {turn.tools.length > 0 && (
+                                                            <span className="text-[11px] text-muted-foreground/70 ml-auto">
+                                                                {turn.tools.length} 次工具调用
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                    {turn.showThinking && (turn.thinking || turn.tools.length > 0) && (
+                                                        <div className="border-t border-border/40 px-3 py-2 space-y-2 text-xs text-muted-foreground">
+                                                            {turn.thinking && (
+                                                                <div className="whitespace-pre-wrap leading-relaxed max-h-[220px] overflow-y-auto">
+                                                                    {turn.thinking}
+                                                                </div>
+                                                            )}
+                                                            {turn.tools.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                                                    {turn.tools.map((tl, i) => (
+                                                                        <span
+                                                                            key={`${tl.name}-${i}`}
+                                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-background/80 border border-border/50 text-[11px] font-mono"
+                                                                        >
+                                                                            {tl.status !== 'DONE' && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                                                                            <span>{tl.name}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                {turn.pending ? (
-                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在通过 agy CLI 执行...
-                                                    </div>
-                                                ) : turn.error ? (
-                                                    <div className="text-xs text-destructive whitespace-pre-wrap">{turn.error}</div>
-                                                ) : (
-                                                    <div className="text-sm whitespace-pre-wrap leading-relaxed">{turn.reply || '（无文本返回）'}</div>
-                                                )}
-                                            </div>
+                                            )}
+
+                                            {turn.error && (
+                                                <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-xs text-destructive whitespace-pre-wrap">
+                                                    {turn.error}
+                                                </div>
+                                            )}
+
+                                            {turn.reply && (
+                                                <div className="rounded-2xl bg-card border border-border/50 px-4 py-3 text-sm leading-relaxed">
+                                                    <MarkdownRenderer content={turn.reply} />
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
-                                {isRunning && <StreamingIndicator />}
+                                {isRunning && !isStreamingCli && <StreamingIndicator />}
                                 <div ref={bottomRef} className="h-4" />
                             </div>
                         )}
@@ -975,41 +1163,45 @@ export function ChatView({
                                     onSelectEffort={handleSelectEffort}
                                 />
 
-                                {/* 3-mode Execution Guard Pill */}
-                                <button
-                                    type="button"
-                                    onClick={handleCycleGuardMode}
-                                    title="点击切换执行审批策略：智能放行（推荐） → 全自动 → 逐项确认"
-                                    className={cn(
-                                        'inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors cursor-pointer',
-                                        !autoAccept
-                                            ? 'bg-muted/50 text-muted-foreground border-border/60 hover:text-foreground'
-                                            : autoAcceptPolicy === 'full'
-                                                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                                                : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
-                                    )}
-                                >
-                                    {!autoAccept ? <ShieldAlert className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
-                                    <span>{!autoAccept ? '逐项确认' : autoAcceptPolicy === 'full' ? '全自动' : '智能放行'}</span>
-                                </button>
+                                {/* 3-mode Execution Guard Pill (admin only when Hub IDE active) */}
+                                {isAdmin && detected && (
+                                    <button
+                                        type="button"
+                                        onClick={handleCycleGuardMode}
+                                        title="点击切换执行审批策略：智能放行（推荐） → 全自动 → 逐项确认"
+                                        className={cn(
+                                            'inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors cursor-pointer',
+                                            !autoAccept
+                                                ? 'bg-muted/50 text-muted-foreground border-border/60 hover:text-foreground'
+                                                : autoAcceptPolicy === 'full'
+                                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                                    : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                                        )}
+                                    >
+                                        {!autoAccept ? <ShieldAlert className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                                        <span>{!autoAccept ? '逐项确认' : autoAcceptPolicy === 'full' ? '全自动' : '智能放行'}</span>
+                                    </button>
+                                )}
 
-                                {/* Engine switch: Hub vs agy CLI quick fallback */}
-                                <button
-                                    type="button"
-                                    onClick={() => setUseAgyCli((v) => !v)}
-                                    title={detected ? '切换执行引擎：Antigravity Hub / agy CLI 直连' : 'Hub 离线，当前自动使用 agy CLI 直连'}
-                                    className={cn(
-                                        'inline-flex items-center gap-1 h-7 px-2 rounded-full text-[11px] border transition-colors cursor-pointer',
-                                        useAgyCli || !detected
-                                            ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/30'
-                                            : 'bg-muted/40 text-muted-foreground border-border/50 hover:text-foreground'
-                                    )}
-                                >
-                                    <Terminal className="h-3 w-3" />
-                                    <span>{useAgyCli || !detected ? 'agy 直连' : 'Hub'}</span>
-                                </button>
+                                {/* Engine switch: Hub vs agy CLI only shown if Hub IDE actually connected */}
+                                {detected && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setUseAgyCli((v) => !v)}
+                                        title="切换执行引擎：Antigravity Hub / agy CLI 直连"
+                                        className={cn(
+                                            'inline-flex items-center gap-1 h-7 px-2 rounded-full text-[11px] border transition-colors cursor-pointer',
+                                            useAgyCli
+                                                ? 'bg-muted text-foreground border-border'
+                                                : 'bg-muted/40 text-muted-foreground border-border/50 hover:text-foreground'
+                                        )}
+                                    >
+                                        <Terminal className="h-3 w-3" />
+                                        <span>{useAgyCli ? 'CLI' : 'Hub'}</span>
+                                    </button>
+                                )}
 
-                                {(hasLowQuota || hasRateLimitError) && (
+                                {isAdmin && (hasLowQuota || hasRateLimitError) && (
                                     <button
                                         type="button"
                                         onClick={handleQuickRotateAccount}
@@ -1215,25 +1407,27 @@ export function ChatView({
                                 >
                                     <Paperclip className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                    variant={showSourceControl ? 'secondary' : 'ghost'}
-                                    size="icon"
-                                    className={cn(
-                                        'shrink-0 h-9 w-9 sm:h-11 sm:w-11 rounded-lg border border-border/50',
-                                        showSourceControl && 'border-primary/30'
-                                    )}
-                                    onClick={() => setShowSourceControl(v => !v)}
-                                    title="源代码管理"
-                                >
-                                    <GitBranch className="h-4 w-4" />
-                                </Button>
+                                {isAdmin && (
+                                    <Button
+                                        variant={showSourceControl ? 'secondary' : 'ghost'}
+                                        size="icon"
+                                        className={cn(
+                                            'shrink-0 h-9 w-9 sm:h-11 sm:w-11 rounded-lg border border-border/50',
+                                            showSourceControl && 'border-primary/30'
+                                        )}
+                                        onClick={() => setShowSourceControl(v => !v)}
+                                        title="源代码管理"
+                                    >
+                                        <GitBranch className="h-4 w-4" />
+                                    </Button>
+                                )}
                                 <Textarea
                                     ref={inputRef}
                                     value={input}
                                     onChange={e => handleInputChange(e.target.value)}
                                     onKeyDown={handleKeyDown}
                                     onPaste={handlePaste}
-                                    placeholder={targetServer ? `向 ${targetServer.name} (${targetServer.ip}) 发送指令...` : currentConvId ? "输入消息继续对话..." : "问我任何服务器运维或代码问题..."}
+                                    placeholder={currentConvId ? "输入消息继续对话..." : "问我任何服务器运维或代码问题..."}
                                     className="flex-1 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 min-h-[36px] sm:min-h-[42px] max-h-[200px] text-sm !py-[8px]"
                                     rows={1}
                                     onInput={(e) => {

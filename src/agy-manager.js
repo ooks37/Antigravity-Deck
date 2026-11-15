@@ -5,10 +5,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const { getSettings } = require('./config');
 const { getChildProcessEnv } = require('./proxy-manager');
+const { readCliConversationSteps } = require('./cli-conversations');
 
 const defaultExecFileAsync = promisify(execFile);
 
@@ -147,6 +148,8 @@ function getDefaultAgyCandidates(env = process.env, platformName = process.platf
 /** Create an `agy` manager instance (injectable dependencies for testing). */
 function createAgyManager(deps = {}) {
     const execFileAsync = deps.execFileAsync || defaultExecFileAsync;
+    const spawnFn = deps.spawn || spawn;
+    const readCliSteps = deps.readCliConversationSteps || readCliConversationSteps;
     const existsSync = deps.existsSync || fs.existsSync;
     const statSync = deps.statSync || fs.statSync;
     const getAppSettings = deps.getSettings || getSettings;
@@ -470,13 +473,13 @@ function createAgyManager(deps = {}) {
         return raw && !raw.startsWith('MODEL_') ? raw : null;
     }
 
-    async function runAgyPrompt({ prompt, model, modelLabel, effort, conversationId, workspace, timeoutMs = 120000 } = {}) {
+    async function preparePromptExecution({ prompt, model, modelLabel, effort, conversationId, workspace } = {}) {
         if (!prompt || !String(prompt).trim()) {
-            return { statusCode: 400, success: false, error: 'prompt 不能为空' };
+            return { ok: false, errorResult: { statusCode: 400, success: false, error: 'prompt 不能为空' } };
         }
         const binary = await findAgyBinary();
         if (!binary.found) {
-            return { statusCode: 404, success: false, error: binary.error || '未检测到 agy CLI' };
+            return { ok: false, errorResult: { statusCode: 404, success: false, error: binary.error || '未检测到 agy CLI' } };
         }
 
         const args = ['-p', String(prompt).trim(), '--output-format', 'stream-json'];
@@ -488,10 +491,20 @@ function createAgyManager(deps = {}) {
         if (cleanEffort) {
             args.push('--effort', cleanEffort);
         }
-        if (conversationId && typeof conversationId === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(conversationId.trim())) {
-            args.push('--conversation', conversationId.trim());
+        const cleanConvId = (conversationId && typeof conversationId === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(conversationId.trim()))
+            ? conversationId.trim()
+            : null;
+        if (cleanConvId) {
+            args.push('--conversation', cleanConvId);
         }
         const cwd = workspace && typeof workspace === 'string' && existsSync(workspace) ? workspace : undefined;
+        return { ok: true, binary, args, cleanEffort, resolvedModel, cleanConvId, cwd };
+    }
+
+    async function runAgyPrompt({ prompt, model, modelLabel, effort, conversationId, workspace, timeoutMs = 120000 } = {}) {
+        const prep = await preparePromptExecution({ prompt, model, modelLabel, effort, conversationId, workspace });
+        if (!prep.ok) return prep.errorResult;
+        const { binary, args, cleanEffort, resolvedModel, cwd } = prep;
 
         try {
             const { stdout, stderr } = await runAgy(binary.path, args, timeoutMs, cwd);
@@ -539,12 +552,233 @@ function createAgyManager(deps = {}) {
         }
     }
 
+    function streamAgyPrompt({ prompt, model, modelLabel, effort, conversationId, workspace, timeoutMs = 180000, onSpawn } = {}, onEvent = () => {}) {
+        return (async () => {
+            const prep = await preparePromptExecution({ prompt, model, modelLabel, effort, conversationId, workspace });
+            if (!prep.ok) return prep.errorResult;
+            const { binary, args, cleanEffort, resolvedModel, cleanConvId, cwd } = prep;
+
+            const startedAt = Date.now();
+            let sessionId = cleanConvId || null;
+            let turnBaseIndex = 0;
+            if (cleanConvId) {
+                try {
+                    const countRes = readCliSteps(cleanConvId, { homeDir, countOnly: true });
+                    turnBaseIndex = Number(countRes?.totalSteps) || 0;
+                } catch { /* non-fatal */ }
+            }
+
+            let emittedInit = false;
+            let fullText = '';
+            let finalResultText = '';
+            let eventsCount = 0;
+            let lastThinking = '';
+            let lastStepSig = '';
+            let lastPhase = 'thinking';
+            let stderrBuf = '';
+            let stdoutBuf = '';
+            let aborted = false;
+            let timedOut = false;
+
+            const safeEmit = (ev) => {
+                try { onEvent(ev); } catch { /* ignore listener errors */ }
+            };
+
+            const maybeEmitInit = (sid) => {
+                if (!sid || emittedInit) return;
+                emittedInit = true;
+                sessionId = sid;
+                safeEmit({
+                    type: 'init',
+                    sessionId: sid,
+                    model: resolvedModel || null,
+                    effort: cleanEffort || null,
+                });
+            };
+
+            const syncCliDbProgress = () => {
+                if (!sessionId) return;
+                try {
+                    const res = readCliSteps(sessionId, { homeDir, startIndex: turnBaseIndex });
+                    if (!res || !Array.isArray(res.steps)) return;
+                    const thinkingParts = [];
+                    for (const step of res.steps) {
+                        const thought = step?.plannerResponse?.thinking;
+                        if (typeof thought === 'string' && thought.trim()) {
+                            thinkingParts.push(thought.trim());
+                        }
+                    }
+                    const joinedThinking = thinkingParts.join('\n\n');
+                    if (joinedThinking && joinedThinking !== lastThinking) {
+                        lastThinking = joinedThinking;
+                        safeEmit({
+                            type: 'thinking',
+                            text: joinedThinking,
+                            elapsedMs: Date.now() - startedAt,
+                        });
+                    }
+                    const sig = `${res.totalSteps}:${res.steps.map((s) => `${s.type || ''}:${s.status || ''}:${s.plannerResponse?.thinking?.length || 0}`).join(',')}`;
+                    if (sig !== lastStepSig) {
+                        lastStepSig = sig;
+                        safeEmit({
+                            type: 'turn_steps',
+                            sessionId,
+                            baseIndex: turnBaseIndex,
+                            steps: res.steps,
+                            totalSteps: res.totalSteps,
+                        });
+                    }
+                } catch { /* DB may not exist or be mid-commit */ }
+            };
+
+            const processNdjsonLine = (line) => {
+                const trimmed = String(line || '').trim();
+                if (!trimmed.startsWith('{')) return;
+                let obj;
+                try { obj = JSON.parse(trimmed); } catch { return; }
+                eventsCount++;
+
+                const evName = obj.event || obj.type;
+                const su = obj.step_update || (evName === 'step_update' ? obj : null);
+                const resObj = obj.result || (evName === 'result' ? obj : null);
+
+                const sid = obj.conversation_id || su?.conversation_id || resObj?.conversation_id || obj.session_id;
+                if (sid && typeof sid === 'string') {
+                    maybeEmitInit(sid);
+                }
+
+                if (su) {
+                    const st = su.step_type || '';
+                    if (st === 'agent_response') {
+                        const delta = su.text_delta || su.delta || '';
+                        if (delta) {
+                            if (lastPhase !== 'answering') {
+                                lastPhase = 'answering';
+                                safeEmit({ type: 'status', phase: 'answering', elapsedMs: Date.now() - startedAt });
+                            }
+                            fullText += delta;
+                            safeEmit({ type: 'text_delta', text: delta, fullText });
+                        } else if (su.status === 'DONE' && typeof su.response === 'string' && su.response && !fullText) {
+                            fullText = su.response;
+                            safeEmit({ type: 'text_delta', text: su.response, fullText });
+                        }
+                    } else if (st === 'tool') {
+                        if (lastPhase !== 'tool') {
+                            lastPhase = 'tool';
+                            safeEmit({ type: 'status', phase: 'tool', elapsedMs: Date.now() - startedAt });
+                        }
+                        safeEmit({
+                            type: 'tool',
+                            name: su.tool_name || su.name || 'tool',
+                            status: su.status || 'ACTIVE',
+                            info: su.tool_info || null,
+                            elapsedMs: Date.now() - startedAt,
+                        });
+                        syncCliDbProgress();
+                    }
+                }
+
+                if (resObj && typeof resObj.response === 'string') {
+                    finalResultText = resObj.response.trim();
+                } else if (typeof obj.response === 'string' && evName === 'result') {
+                    finalResultText = obj.response.trim();
+                }
+            };
+
+            return await new Promise((resolve) => {
+                const child = spawnFn(binary.path, args, {
+                    cwd,
+                    env: buildAgyEnv(),
+                    windowsHide: true,
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                });
+
+                if (typeof onSpawn === 'function') {
+                    onSpawn(() => {
+                        aborted = true;
+                        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+                    });
+                }
+
+                safeEmit({ type: 'status', phase: 'thinking', elapsedMs: 0 });
+                if (sessionId) maybeEmitInit(sessionId);
+
+                const pollIntervalMs = Number(optsTimeoutCheck(deps.dbPollMs, 350));
+                const dbTimer = setInterval(syncCliDbProgress, pollIntervalMs);
+                const killTimer = setTimeout(() => {
+                    timedOut = true;
+                    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+                    setTimeout(() => {
+                        try { child.kill('SIGKILL'); } catch { /* ignore */ }
+                    }, 2000).unref();
+                }, Math.max(5000, Number(timeoutMs) || 180000));
+
+                child.stdout?.on('data', (chunk) => {
+                    stdoutBuf += chunk.toString('utf8');
+                    const lines = stdoutBuf.split(/\r?\n/);
+                    stdoutBuf = lines.pop() || '';
+                    for (const l of lines) processNdjsonLine(l);
+                });
+
+                child.stderr?.on('data', (chunk) => {
+                    if (stderrBuf.length < 16384) stderrBuf += chunk.toString('utf8');
+                });
+
+                const finalize = (errMsg = null) => {
+                    clearInterval(dbTimer);
+                    clearTimeout(killTimer);
+                    if (stdoutBuf.trim()) {
+                        processNdjsonLine(stdoutBuf);
+                        stdoutBuf = '';
+                    }
+                    syncCliDbProgress();
+
+                    const text = (finalResultText || fullText).trim();
+                    if (aborted) {
+                        return resolve({ statusCode: 499, success: false, error: '已取消生成', sessionId, text, eventsCount });
+                    }
+                    if (timedOut) {
+                        return resolve({ statusCode: 504, success: false, error: 'agy 执行超时', sessionId, text, eventsCount });
+                    }
+                    if (errMsg && !text) {
+                        return resolve({ statusCode: 500, success: false, error: errMsg, sessionId, text, eventsCount });
+                    }
+                    return resolve({
+                        statusCode: 200,
+                        success: true,
+                        sessionId,
+                        model: resolvedModel || null,
+                        effort: cleanEffort || null,
+                        text,
+                        thinking: lastThinking || undefined,
+                        eventsCount,
+                    });
+                };
+
+                child.on('error', (err) => finalize(err?.message || '启动 agy CLI 失败'));
+                child.on('close', (code) => {
+                    if (code && code !== 0 && !finalResultText && !fullText) {
+                        const detail = stderrBuf.trim() || `agy 退出码 ${code}`;
+                        return finalize(detail);
+                    }
+                    return finalize(null);
+                });
+            });
+        })();
+    }
+
+    function optsTimeoutCheck(v, fallback) {
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 20 ? n : fallback;
+    }
+
     return {
         findAgyBinary,
         getAgyStatus,
         getAgyChangelog,
         updateAgy,
         runAgyPrompt,
+        streamAgyPrompt,
         getAgyModels,
         invalidateModelsCache,
     };

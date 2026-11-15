@@ -3,27 +3,20 @@
 
 const { lsConfig } = require('./config');
 const { getInstanceForCascade } = require('./poller');
-const { getEffectiveAuthKey, verifyAuthKey } = require('./auth-manager');
+const { authenticateRequest, canAccessConversation } = require('./user-manager');
 
 const viewers = new Set();
-const globalViewers = new Set(); // clients that want ALL events (Live Logs)
+const globalViewers = new Set(); // clients that want ALL events (Live Logs — admin only)
 const clientConvMap = new Map(); // Map<ws, convId> — per-client conversation tracking
 
 function setupWebSocket(wss, { ensureCached, stepCache }) {
     wss.on('connection', (ws, req) => {
-        // Auth check for WebSocket (skip for localhost connections — same policy as HTTP)
-        if (getEffectiveAuthKey()) {
-            const ip = req.socket.remoteAddress || '';
-            const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-            if (!isLocal) {
-                const url = new URL(req.url, 'http://localhost');
-                const key = url.searchParams.get('auth_key') || '';
-                if (!verifyAuthKey(key)) {
-                    ws.close(4401, 'Unauthorized');
-                    return;
-                }
-            }
+        const user = authenticateRequest(req);
+        if (!user) {
+            ws.close(4401, 'Unauthorized');
+            return;
         }
+        ws._user = user;
         viewers.add(ws);
         // Hub model (2.0.11): detection = the shared hub LS is up (lsConfig.detected),
         // NOT whether any workspace is tracked (lsInstances is empty until a workspace
@@ -34,6 +27,19 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
             try {
                 const msg = JSON.parse(raw.toString());
                 if (msg.type === 'set_conversation') {
+                    if (msg.conversationId && !canAccessConversation(msg.conversationId, ws._user)) {
+                        sendToOne(ws, {
+                            type: 'steps_init',
+                            conversationId: msg.conversationId,
+                            steps: [],
+                            baseIndex: 0,
+                            stepCount: 0,
+                            source: 'none',
+                            notFound: true,
+                            forbidden: true,
+                        });
+                        return;
+                    }
                     clientConvMap.set(ws, msg.conversationId);
                     console.log(`[WS] set_conversation → ${msg.conversationId?.substring(0, 8)}, clients: ${clientConvMap.size}`);
                     await ensureCached(msg.conversationId, getInstanceForCascade(msg.conversationId));
@@ -55,11 +61,11 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
                         });
                     }
                 } else if (msg.type === 'subscribe_all') {
-                    // Live Logs mode: receive all broadcasts regardless of conversation
+                    if (ws._user?.role !== 'admin') return;
                     globalViewers.add(ws);
                     console.log(`[WS] subscribe_all — global viewers: ${globalViewers.size}`);
                 } else if (msg.type === 'app_log') {
-                    // Frontend error/log forwarding — rebroadcast to all Live Logs viewers
+                    // Frontend error/log forwarding — rebroadcast to all admin Live Logs viewers
                     broadcastToGlobal({ ...msg, ts: msg.ts || Date.now() });
                 }
             } catch (e) { }
@@ -84,23 +90,26 @@ function broadcast(data, targetConvId) {
     viewers.forEach(v => {
         if (v.readyState !== 1) return;
         if (targetConvId && clientConvMap.get(v) !== targetConvId) return;
+        if (targetConvId && !canAccessConversation(targetConvId, v._user)) return;
         v.send(msg);
         sent.add(v);
     });
-    // Also send to global viewers (Live Logs — all cascades)
-    // Skip clients that already received via per-conversation match above
+    // Also send to admin global viewers (Live Logs — all cascades)
     globalViewers.forEach(v => {
         if (v.readyState !== 1) return;
         if (sent.has(v)) return;
+        if (v._user?.role !== 'admin') return;
         v.send(msg);
     });
 }
 
-// Broadcast to ALL connected viewers (no conversation filter)
-function broadcastAll(data) {
+// Broadcast to ALL connected viewers (optionally scoped to one ownerId or admins)
+function broadcastAll(data, targetOwnerId = null) {
     const msg = JSON.stringify(data);
     viewers.forEach(v => {
-        if (v.readyState === 1) v.send(msg);
+        if (v.readyState !== 1) return;
+        if (targetOwnerId && v._user?.id !== targetOwnerId) return;
+        v.send(msg);
     });
 }
 

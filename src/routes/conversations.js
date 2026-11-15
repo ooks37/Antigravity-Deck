@@ -14,9 +14,10 @@ const {
     hasCliConversation,
     readCliConversationSteps,
     listCliConversationIds,
-    getCliDbPath,
+    extractCliConversationSummary,
 } = require('../cli-conversations');
 const agyManager = require('../agy-manager');
+const userManager = require('../user-manager');
 const {
     listOAuthAccounts,
     getActiveAccountQuotaSummary,
@@ -112,6 +113,7 @@ module.exports = function setupConversationsRoutes(app) {
             const wsUriNorm = normalize(wsUri);
             const filtered = {};
             for (const [id, info] of Object.entries(all)) {
+                if (req.user && !userManager.canAccessConversation(id, req.user)) continue;
                 const cascadeWsUris = (info.workspaces || []).map(w => w.workspaceFolderAbsoluteUri);
                 const isOrphan = !info.workspaces || info.workspaces.length === 0;
                 const matchesWorkspace = cascadeWsUris.some(uri => normalize(uri) === wsUriNorm);
@@ -127,6 +129,7 @@ module.exports = function setupConversationsRoutes(app) {
     // accurately reflects Free/Jio/Pixel/Pro/Ultra account differences.
     app.get('/api/models', async (req, res) => {
         try {
+            const isAdmin = !req.user || req.user.role === 'admin';
             const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
             const oauthOverview = listOAuthAccounts();
             const activeEntry = (oauthOverview.accounts || []).find((a) => a.isActive) || null;
@@ -208,8 +211,8 @@ module.exports = function setupConversationsRoutes(app) {
                     source: 'ls',
                     hubSyncing: false,
                     activeAccount: {
-                        alias: activeEntry?.alias || null,
-                        email: activeEmail || lsEmail || null,
+                        alias: isAdmin ? (activeEntry?.alias || null) : null,
+                        email: isAdmin ? (activeEmail || lsEmail || null) : null,
                         tierId: tierInfo.tierId,
                         tierLabel: activeSummary?.tierLabel || tierInfo.tierLabel,
                         modelCount: models.length,
@@ -217,9 +220,9 @@ module.exports = function setupConversationsRoutes(app) {
                 });
             }
 
-            // Hub LS offline, restarting after OAuth swap, or temporarily pointing at old session:
+            // Hub LS offline, disabled (lightweight CLI mode), or temporarily out of sync:
             // immediately serve active account's real agy CLI / CloudCode models with zero 500 error.
-            const agyRes = await agyManager.getAgyModels({ force: true }).catch(() => ({ models: [] }));
+            const agyRes = await agyManager.getAgyModels({ force: forceRefresh }).catch(() => ({ models: [] }));
             const agyList = Array.isArray(agyRes?.models) ? agyRes.models : [];
             const fallback = buildCliFallbackModels(agyList, activeSummary);
             const tierInfo = classifyAccountTier({
@@ -230,10 +233,10 @@ module.exports = function setupConversationsRoutes(app) {
             return res.json({
                 ...fallback,
                 source: agyList.length ? 'agy-cli' : 'cloudcode',
-                hubSyncing: Boolean(lsFailed || !lsEmailMatches),
+                hubSyncing: Boolean(process.env.ENABLE_IDE_HUB === 'true' && (lsFailed || !lsEmailMatches)),
                 activeAccount: {
-                    alias: activeEntry?.alias || null,
-                    email: activeEmail,
+                    alias: isAdmin ? (activeEntry?.alias || null) : null,
+                    email: isAdmin ? activeEmail : null,
                     tierId: tierInfo.tierId,
                     tierLabel: tierInfo.tierLabel,
                     modelCount: fallback.models.length,
@@ -264,28 +267,44 @@ module.exports = function setupConversationsRoutes(app) {
                 }
             }
 
-            // Merge local CLI SQLite conversations so new agy sessions always appear even before Jetbox sync
+            // Merge local CLI SQLite conversations so new agy sessions always appear even when IDE Hub is off
             for (const cliId of listCliConversationIds()) {
+                if (req.user && !userManager.canAccessConversation(cliId, req.user)) continue;
                 if (!summaries[cliId]) {
                     try {
-                        const dbPath = getCliDbPath(cliId);
-                        const stat = dbPath ? fs.statSync(dbPath) : null;
-                        const first = readCliConversationSteps(cliId, { startIndex: 0, endIndex: 1 });
-                        const firstText = first?.steps?.[0]?.userInput?.userResponse
-                            || first?.steps?.[0]?.userInput?.items?.[0]?.text
-                            || 'CLI 对话';
-                        summaries[cliId] = {
-                            summary: String(firstText).trim().slice(0, 80) || 'CLI 对话',
-                            stepCount: first?.totalSteps || 0,
-                            lastModifiedTime: stat ? stat.mtime.toISOString() : new Date().toISOString(),
-                            createdTime: stat ? stat.birthtime.toISOString() : new Date().toISOString(),
-                            source: 'cli-db',
-                        };
+                        const info = extractCliConversationSummary(cliId);
+                        if (info) {
+                            summaries[cliId] = {
+                                summary: info.summary || `对话 ${cliId.slice(0, 8)}`,
+                                stepCount: info.totalSteps || 0,
+                                lastModifiedTime: info.lastModifiedTime,
+                                createdTime: info.createdTime,
+                                source: 'cli-db',
+                            };
+                        }
                     } catch { /* ignore unreadable db */ }
                 }
             }
 
-            res.json({ trajectorySummaries: summaries });
+            const includeEmpty = req.query.includeEmpty === '1';
+            const metaMap = userManager.getConversationMetaMap();
+            const visibleSummaries = {};
+            for (const [id, rawInfo] of Object.entries(summaries)) {
+                if (req.user && !userManager.canAccessConversation(id, req.user)) continue;
+                const info = { ...rawInfo };
+                if (!includeEmpty && (info.stepCount || 0) === 0) continue;
+                const meta = metaMap.get(id);
+                if (meta?.customTitle) {
+                    info.summary = meta.customTitle;
+                    info.customTitle = meta.customTitle;
+                }
+                if (meta?.ownerId) {
+                    info.ownerId = meta.ownerId;
+                }
+                visibleSummaries[id] = info;
+            }
+
+            res.json({ trajectorySummaries: visibleSummaries });
         }
         catch (e) { res.status(500).json({ error: e.message }); }
     });
@@ -299,9 +318,30 @@ module.exports = function setupConversationsRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    // Rename a conversation (persisted per owner/admin in SQLite)
+    app.patch('/api/conversations/:id', (req, res) => {
+        const cascadeId = req.params.id;
+        if (req.user && !userManager.canAccessConversation(cascadeId, req.user)) {
+            return res.status(403).json({ error: '无权修改该对话' });
+        }
+        try {
+            const actor = req.user || userManager.getPrimaryAdmin();
+            const result = userManager.renameConversation(cascadeId, req.body?.title, actor);
+            try {
+                require('../ws').broadcastAll({ type: 'conversations_updated' }, req.user?.id || null);
+            } catch { /* ignore */ }
+            return res.json({ success: true, id: cascadeId, title: result.title });
+        } catch (e) {
+            return res.status(e.statusCode || 400).json({ error: e.message || '重命名失败' });
+        }
+    });
+
     // Conversation steps — tries Hub LS first, falls back to local antigravity-cli SQLite DB
     app.get('/api/conversations/:id/steps', async (req, res) => {
         const cascadeId = req.params.id;
+        if (req.user && !userManager.canAccessConversation(cascadeId, req.user)) {
+            return res.status(403).json({ error: '无权访问该对话' });
+        }
         const startIndex = parseInt(req.query.start) || 0;
         const endIndex = parseInt(req.query.end) || 999999;
         try {
@@ -335,6 +375,9 @@ module.exports = function setupConversationsRoutes(app) {
     app.get('/api/conversations/:id/steps/older', async (req, res) => {
         try {
             const cascadeId = req.params.id;
+            if (req.user && !userManager.canAccessConversation(cascadeId, req.user)) {
+                return res.status(403).json({ error: '无权访问该对话' });
+            }
             const cache = stepCache[cascadeId];
             if (!cache || (cache.baseIndex || 0) === 0) {
                 return res.json({ steps: [], baseIndex: 0, hasMore: false });
@@ -372,7 +415,13 @@ module.exports = function setupConversationsRoutes(app) {
 
     // User info
     app.get('/api/user', async (req, res) => {
-        try { res.json(await callApi('GetUserStatus', {}, resolveInst(req))); }
+        try {
+            const inst = resolveInst(req);
+            if (!inst) {
+                return res.json({ user: req.user || null, mode: 'cli' });
+            }
+            res.json(await callApi('GetUserStatus', {}, inst));
+        }
         catch (e) { res.status(500).json({ error: e.message }); }
     });
 

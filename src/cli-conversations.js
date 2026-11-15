@@ -298,6 +298,69 @@ function listCliConversationIds(opts = {}) {
         .filter(isValidCascadeId);
 }
 
+function extractCliConversationSummary(cascadeId, opts = {}) {
+    const dbPath = getCliDbPath(cascadeId, opts);
+    if (!dbPath || !fs.existsSync(dbPath)) return null;
+    const DatabaseSync = getDatabaseSync();
+    if (!DatabaseSync) return null;
+
+    let stat = null;
+    try { stat = fs.statSync(dbPath); } catch { return null; }
+
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+        const countRow = db.prepare('SELECT COUNT(*) AS cnt FROM steps').get();
+        const totalSteps = Number(countRow?.cnt || 0);
+        if (totalSteps === 0) {
+            return {
+                totalSteps: 0,
+                summary: '',
+                lastModifiedTime: stat.mtime.toISOString(),
+                createdTime: stat.birthtime.toISOString(),
+            };
+        }
+        const firstUserRow = db
+            .prepare('SELECT idx, step_type, status, metadata, step_payload FROM steps WHERE step_type = 14 ORDER BY idx ASC LIMIT 1')
+            .get()
+            || db.prepare('SELECT idx, step_type, status, metadata, step_payload FROM steps ORDER BY idx ASC LIMIT 1').get();
+        const decoded = firstUserRow ? decodeCliStepRow(firstUserRow) : null;
+        const rawText = decoded?.userInput?.userResponse || decoded?.userInput?.items?.[0]?.text || '';
+        const clean = String(rawText).replace(/\s+/g, ' ').trim().slice(0, 80);
+        return {
+            totalSteps,
+            summary: clean || `对话 ${cascadeId.slice(0, 8)}`,
+            lastModifiedTime: stat.mtime.toISOString(),
+            createdTime: stat.birthtime.toISOString(),
+        };
+    } catch {
+        return null;
+    } finally {
+        db.close();
+    }
+}
+
+function deleteCliConversation(cascadeId, opts = {}) {
+    const dbPath = getCliDbPath(cascadeId, opts);
+    if (!dbPath) return false;
+    const dir = path.dirname(dbPath);
+    const candidates = [
+        dbPath,
+        `${dbPath}-wal`,
+        `${dbPath}-shm`,
+        path.join(dir, `${cascadeId}.pb`),
+    ];
+    let removed = false;
+    for (const p of candidates) {
+        try {
+            if (fs.existsSync(p)) {
+                fs.unlinkSync(p);
+                removed = true;
+            }
+        } catch { /* ignore */ }
+    }
+    return removed;
+}
+
 module.exports = {
     getCliConversationsDir,
     isValidCascadeId,
@@ -308,4 +371,6 @@ module.exports = {
     decodeCliStepRow,
     readCliConversationSteps,
     listCliConversationIds,
+    extractCliConversationSummary,
+    deleteCliConversation,
 };

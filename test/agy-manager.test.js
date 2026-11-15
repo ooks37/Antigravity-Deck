@@ -211,6 +211,74 @@ async function runTest(name, fn) {
         assert.ok(capturedArgs.includes('--conversation') && capturedArgs[capturedArgs.indexOf('--conversation') + 1] === 'conv-456');
     });
 
+    await runTest('streamAgyPrompt streams thinking from CLI DB, tool updates, text deltas, and supports cancellation', async () => {
+        const { EventEmitter } = require('events');
+        const { PassThrough } = require('stream');
+        const fakeBin = '/usr/local/bin/agy';
+        let capturedSpawnArgs = null;
+
+        const mockSpawn = (_bin, args) => {
+            capturedSpawnArgs = args;
+            const child = new EventEmitter();
+            child.stdout = new PassThrough();
+            child.stderr = new PassThrough();
+            child.kill = () => {};
+
+            setTimeout(() => {
+                child.stdout.write(`${JSON.stringify({ event: 'init', conversation_id: 'conv-stream-777' })}\n`);
+            }, 10);
+            setTimeout(() => {
+                child.stdout.write(`${JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'conv-stream-777', step_type: 'tool', status: 'ACTIVE', tool_name: 'run_command' } })}\n`);
+            }, 30);
+            setTimeout(() => {
+                child.stdout.write(`${JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'conv-stream-777', step_type: 'agent_response', text_delta: '负载正常 ' } })}\n`);
+            }, 55);
+            setTimeout(() => {
+                child.stdout.write(`${JSON.stringify({ event: 'result', result: { conversation_id: 'conv-stream-777', status: 'SUCCESS', response: '负载正常 (0.10)' } })}\n`);
+                child.stdout.end();
+                child.emit('close', 0);
+            }, 75);
+            return child;
+        };
+
+        const mgr = createAgyManager({
+            getSettings: () => ({ agyBinaryPath: fakeBin }),
+            existsSync: (p) => p === fakeBin,
+            statSync: () => ({ isFile: () => true }),
+            dbPollMs: 25,
+            spawn: mockSpawn,
+            readCliConversationSteps: (sid) => sid === 'conv-stream-777' ? {
+                totalSteps: 2,
+                baseIndex: 0,
+                steps: [
+                    { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE', userInput: { userResponse: '检查负载' } },
+                    { type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE', status: 'CORTEX_STEP_STATUS_IN_PROGRESS', plannerResponse: { thinking: '先执行 uptime 查看当前系统负载。' } },
+                ],
+                source: 'cli-db',
+            } : null,
+            execFileAsync: async (_bin, args) => {
+                if (args[0] === 'models') return { stdout: 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n', stderr: '' };
+                return { stdout: '', stderr: '' };
+            },
+        });
+
+        const events = [];
+        const res = await mgr.streamAgyPrompt(
+            { prompt: '检查负载', modelLabel: 'Gemini 3.8 Flash (Low)', effort: 'low' },
+            (ev) => events.push(ev),
+        );
+
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.sessionId, 'conv-stream-777');
+        assert.strictEqual(res.text, '负载正常 (0.10)');
+        assert.ok(capturedSpawnArgs.includes('--effort') && capturedSpawnArgs.includes('low'));
+        assert.ok(events.some((e) => e.type === 'init' && e.sessionId === 'conv-stream-777'));
+        assert.ok(events.some((e) => e.type === 'thinking' && e.text.includes('查看当前系统负载')));
+        assert.ok(events.some((e) => e.type === 'tool' && e.name === 'run_command'));
+        assert.ok(events.some((e) => e.type === 'text_delta' && e.text === '负载正常 '));
+        assert.ok(events.some((e) => e.type === 'turn_steps' && e.steps.length === 2));
+    });
+
     console.log(`\nResults: ${passed} passed, ${failed} failed\n`);
     process.exit(failed > 0 ? 1 : 0);
 })();

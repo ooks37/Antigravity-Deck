@@ -1,81 +1,86 @@
 'use client';
-import { memo, useMemo, useState, useEffect, useCallback } from 'react';
+
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Step } from '@/lib/types';
 import { extractStepContent } from '@/lib/step-utils';
 import { MarkdownRenderer } from '../markdown-renderer';
 import { useCopy } from './chat-helpers';
-import { RawJsonViewer } from './raw-json-viewer';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { Copy, Check, FileText, Bot, AlertTriangle } from 'lucide-react';
 import { API_BASE } from '@/lib/config';
-import { authHeaders } from '@/lib/auth';
+import { authFetch } from '@/lib/auth';
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, FileText } from 'lucide-react';
 
-// View an MD artifact file in a Sheet (side panel)
-function ArtifactPreview({ uri }: { uri: string }) {
+function ArtifactPreviewButton({ fileUri }: { fileUri: string }) {
+    const fileName = fileUri.split('/').pop() || '产物文件';
     const [content, setContent] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const fileName = uri.split('/').pop() || 'file';
+    const [open, setOpen] = useState(false);
+    const { copied, copy } = useCopy();
 
-    const loadFile = useCallback(() => {
-        if (content || loading) return; // already loaded or loading
+    const loadContent = useCallback(async () => {
+        if (content !== null) return;
         setLoading(true);
-        setError(null);
-        fetch(`${API_BASE}/api/file/read`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders() },
-            body: JSON.stringify({ path: uri })
-        })
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then(d => {
-                if (d.content) { setContent(d.content); }
-                else { setError('文件为空'); }
-                setLoading(false);
-            })
-            .catch(e => { setError(e.message); setLoading(false); });
-    }, [uri, content, loading]);
+        try {
+            const cleanPath = fileUri.replace(/^file:\/\//, '');
+            const res = await authFetch(`${API_BASE}/api/file/read`, {
+                method: 'POST',
+                body: JSON.stringify({ path: cleanPath }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setContent(data.content || '（空文件）');
+            } else {
+                setContent(`无法加载文件 (${res.status})`);
+            }
+        } catch {
+            setContent('加载文件内容失败');
+        } finally {
+            setLoading(false);
+        }
+    }, [fileUri, content]);
+
+    useEffect(() => {
+        if (open) loadContent();
+    }, [open, loadContent]);
 
     return (
-        <Sheet>
+        <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
                 <Button
                     variant="ghost"
-                    onClick={loadFile}
-                    className="mt-2 w-full justify-start gap-2 px-3 py-2.5 h-auto text-xs font-medium text-purple-400 border border-purple-500/20 bg-purple-950/15 hover:bg-purple-500/10 hover:border-purple-500/30 hover:text-purple-400 rounded-lg"
+                    className="mt-2 w-full justify-start gap-2 px-3 py-2 h-auto text-xs font-medium text-foreground/85 border border-border/60 bg-muted/25 hover:bg-muted/50 rounded-lg"
                 >
-                    <FileText className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 min-w-0 text-left truncate">{fileName}</span>
-                    <span className="text-[10px] text-muted-foreground/50">点击查看 →</span>
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{fileName}</span>
+                    <span className="ml-auto text-[10px] text-muted-foreground">查看文件</span>
                 </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:w-[600px] sm:max-w-[600px] p-0 flex flex-col overflow-hidden">
-                <SheetHeader className="px-5 pt-5 pb-3 border-b border-border/50 shrink-0">
-                    <SheetTitle className="flex items-center gap-2 text-sm">
-                        <FileText className="h-4 w-4" />
-                        <span>{fileName}</span>
-                    </SheetTitle>
-                    <SheetDescription className="text-xs text-muted-foreground/70 truncate">
-                        {(() => { try { const p = decodeURIComponent(new URL(uri).pathname); return /^\/[a-zA-Z]:/.test(p) ? p.substring(1) : p; } catch { return uri.replace('file:///', ''); } })()}
-                    </SheetDescription>
-                </SheetHeader>
-                <ScrollArea className="flex-1 min-h-0">
-                    <div className="p-5 text-sm leading-relaxed overflow-x-auto max-w-full">
-                        {loading && (
-                            <div className="text-muted-foreground animate-pulse">正在加载文件内容...</div>
+            <SheetContent side="right" className="w-[85vw] sm:w-[540px] sm:max-w-[540px] p-0 flex flex-col">
+                <SheetHeader className="px-4 py-3 border-b border-border/40">
+                    <div className="flex items-center justify-between pr-6">
+                        <SheetTitle className="text-sm font-medium flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            {fileName}
+                        </SheetTitle>
+                        {content && (
+                            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={(e) => copy(content, e)}>
+                                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                {copied ? '已复制' : '复制'}
+                            </Button>
                         )}
-                        {error && (
-                            <div className="text-amber-400/80 text-xs">
-                                <AlertTriangle className="h-3 w-3 inline mr-1" /> 无法加载文件：{error}
-                                <br /><span className="text-muted-foreground/50 text-[10px] mt-1 block">路径：{uri}</span>
-                            </div>
-                        )}
-                        {content && <MarkdownRenderer content={content} />}
                     </div>
+                    <SheetDescription className="text-[11px] font-mono truncate">{fileUri}</SheetDescription>
+                </SheetHeader>
+                <ScrollArea className="flex-1 p-4">
+                    {loading ? (
+                        <div className="text-xs text-muted-foreground py-4">正在读取文件...</div>
+                    ) : (
+                        <div className="text-sm leading-relaxed">
+                            <MarkdownRenderer content={content || ''} />
+                        </div>
+                    )}
                 </ScrollArea>
             </SheetContent>
         </Sheet>
@@ -83,56 +88,81 @@ function ArtifactPreview({ uri }: { uri: string }) {
 }
 
 export const AgentResponse = memo(function AgentResponse({ step, index }: { step: Step; index: number }) {
+    const content = useMemo(() => extractStepContent(step), [step]);
+    const thinking = useMemo(() => (step.plannerResponse?.thinking || '').trim(), [step]);
+    const isThinkingPhase = step.status === 'CORTEX_STEP_STATUS_IN_PROGRESS' && !content && Boolean(thinking);
+    const [showThinking, setShowThinking] = useState(isThinkingPhase);
     const { copied, copy } = useCopy();
-    const content = useMemo(() => extractStepContent(step) || '', [step]);
+    const isError = step.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE';
+    const reviewUris = step.notifyUser?.reviewAbsoluteUris || [];
 
-    // Extract review file URIs from NOTIFY_USER steps
-    // Binary protobuf puts paths in field "1" instead of reviewAbsoluteUris
-    const reviewUris = useMemo(() => {
-        const nu = step.notifyUser as Record<string, unknown> | undefined;
-        if (!nu) return [];
-        let uris: string[] = [];
-        if (Array.isArray(nu.reviewAbsoluteUris)) {
-            uris = nu.reviewAbsoluteUris;
-        } else if (nu['1']) {
-            // Binary protobuf numeric field fallback
-            uris = Array.isArray(nu['1']) ? nu['1'] : [nu['1'] as string];
-        }
-        return uris.filter(u => typeof u === 'string' && u.startsWith('file:///'));
-    }, [step]);
+    if (!content && !thinking && reviewUris.length === 0) return null;
 
-    return (
-        <div className="flex justify-start mb-4">
-            <div className="max-w-[92%] group relative rounded-2xl rounded-tl-sm px-4 py-3 bg-card border border-border/60 overflow-hidden min-w-0 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-                <div className="flex items-center gap-2 mb-1.5">
-                    <div className="w-5 h-5 rounded-full bg-primary/15 flex items-center justify-center text-[10px]"><Bot className="h-3 w-3 text-primary" /></div>
-                    <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">智能体</span>
-                    <span className="text-[10px] text-muted-foreground/40 opacity-0 group-hover:opacity-100">#{index + 1}</span>
-                </div>
-                <div className="text-sm leading-relaxed"><MarkdownRenderer content={content} /></div>
-
-                {/* Attached MD files — open in Sheet */}
-                {reviewUris.length > 0 && (
-                    <div className="space-y-1.5 mt-2">
-                        {reviewUris.map((uri, i) => (
-                            <ArtifactPreview key={i} uri={uri} />
-                        ))}
+    if (isError) {
+        return (
+            <div className="my-2">
+                <div className="border-l-2 border-destructive/70 bg-destructive/5 rounded-r-xl px-4 py-3 text-sm">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-destructive mb-1">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        <span>执行异常</span>
                     </div>
-                )}
-
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <RawJsonViewer step={step} />
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 text-muted-foreground/50 hover:text-foreground"
-                        onClick={(e) => copy(content, e)}
-                    >
-                        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                    </Button>
+                    <div className="text-xs sm:text-sm text-destructive/90 leading-relaxed whitespace-pre-wrap">
+                        {content}
+                    </div>
                 </div>
             </div>
+        );
+    }
+
+    return (
+        <div className="group my-3" data-step-index={index}>
+            {thinking && (
+                <div className="mb-2.5 rounded-xl border border-border/60 bg-muted/25 overflow-hidden">
+                    <button
+                        type="button"
+                        onClick={() => setShowThinking((v) => !v)}
+                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left"
+                    >
+                        {showThinking ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                        <span>思考过程</span>
+                        <span className="text-[10px] text-muted-foreground/60 ml-auto font-normal">
+                            {thinking.length} 字
+                        </span>
+                    </button>
+                    {showThinking && (
+                        <div className="px-3 pb-2.5 pt-1 border-t border-border/40 text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-[260px] overflow-y-auto">
+                            {thinking}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {content && (
+                <div className="relative rounded-2xl bg-card border border-border/50 px-4 py-3 text-sm leading-relaxed">
+                    <MarkdownRenderer content={content} />
+                    <div className="mt-2 flex items-center justify-end opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
+                            onClick={(e) => copy(content, e)}
+                        >
+                            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                            <span>{copied ? '已复制' : '复制'}</span>
+                        </Button>
+                    </div>
+                </div>
+            )}
+
+            {reviewUris.length > 0 && (
+                <div className="space-y-1">
+                    {reviewUris.map((uri) => (
+                        <ArtifactPreviewButton key={uri} fileUri={uri} />
+                    ))}
+                </div>
+            )}
         </div>
     );
 });
+
 AgentResponse.displayName = 'AgentResponse';

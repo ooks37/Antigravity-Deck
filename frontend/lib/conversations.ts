@@ -5,7 +5,7 @@
 //   GET /api/conversations  → { trajectorySummaries: { [id]: summary } }
 
 import { API_BASE } from '@/lib/config';
-import { authHeaders } from '@/lib/auth';
+import { authFetch } from '@/lib/auth';
 
 /** Marker id for conversations not attached to any project. */
 export const OUTSIDE_PROJECT = 'outside-of-project';
@@ -72,51 +72,83 @@ export function basename(uri: string): string {
     catch { return uri.replace(/\/+$/, '').split('/').pop() || ''; }
 }
 
+/** Normalize raw CLI/LS prompt snippet into a clean single-line conversation title. */
+export function cleanConversationTitle(raw?: string): string {
+    if (!raw) return '新对话';
+    const singleLine = String(raw)
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/^[#>*\-\s]+/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!singleLine) return '新对话';
+    return singleLine.length > 60 ? `${singleLine.slice(0, 60)}…` : singleLine;
+}
+
+/** Rename a conversation (persisted server-side in SQLite conversation_owners). */
+export async function renameConversation(id: string, title: string): Promise<{ success: boolean; title: string }> {
+    const res = await authFetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `重命名失败: ${res.status}`);
+    return data;
+}
+
+/** Delete a conversation (cleanly deletes LS trajectory if connected and local CLI SQLite DB). */
+export async function deleteConversation(id: string): Promise<{ success: boolean }> {
+    const res = await authFetch(`${API_BASE}/api/cascade/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `删除失败: ${res.status}`);
+    return data;
+}
+
 /**
- * Load the full conversation index: the project list plus every conversation as
- * a flat ConvRow[] sorted by lastModified (newest first). Conversations with no
- * project resolve `projectId` to '' (grouped under "Conversations" by callers).
+ * Load the full conversation index sorted by lastModified (newest first).
+ * Filters out zero-step empty stubs unless they already have a custom title.
  */
 export async function loadConversationIndex(): Promise<{ projects: Project[]; rows: ConvRow[] }> {
     const [pj, cv] = await Promise.all([
-        fetch(`${API_BASE}/api/projects`, { headers: authHeaders() })
-            .then(r => r.json()).catch(() => ({ projects: [] })),
-        fetch(`${API_BASE}/api/conversations`, { headers: authHeaders() })
-            .then(r => r.json()).catch(() => ({ trajectorySummaries: {} })),
+        authFetch(`${API_BASE}/api/projects`)
+            .then(r => (r.ok ? r.json() : { projects: [] })).catch(() => ({ projects: [] })),
+        authFetch(`${API_BASE}/api/conversations`)
+            .then(r => (r.ok ? r.json() : { trajectorySummaries: {} })).catch(() => ({ trajectorySummaries: {} })),
     ]);
 
     const projects: Project[] = pj.projects || [];
     const projById = new Map(projects.map((p: Project) => [p.id, p]));
-    // Folder-URI → projectId. Conversations the LS bound to a project folder but left
-    // without a trajectoryMetadata.projectId (e.g. created via StartCascade with
-    // workspaceUris) still group under the right project by matching the folder.
     const folderToId = new Map(
         projects.filter(p => p.folderUri).map(p => [normUri(p.folderUri), p.id])
     );
-    const summaries: Record<string, RawSummary> = cv.trajectorySummaries || {};
+    const summaries: Record<string, RawSummary & { customTitle?: string }> = cv.trajectorySummaries || {};
 
-    const rows: ConvRow[] = Object.entries(summaries).map(([id, s]) => {
-        const ws: RawWorkspaceRef = (s.workspaces && s.workspaces[0]) || {};
-        const wsUri = ws.workspaceFolderAbsoluteUri || '';
-        let pid = s?.trajectoryMetadata?.projectId || '';
-        if (!pid && wsUri) {
-            const matchedId = folderToId.get(normUri(wsUri));
-            if (matchedId) pid = matchedId;
-        }
-        const proj = projById.get(pid);
-        const repoName = ws.repository?.computedName
-            ? String(ws.repository.computedName).split('/').pop()
-            : '';
-        const projectName = proj?.name || repoName || basename(wsUri) || '';
-        return {
-            id,
-            title: s.summary || '未命名对话',
-            projectId: pid,
-            projectName,
-            lastModified: s.lastModifiedTime || s.createdTime || '',
-            stepCount: s.stepCount || 0,
-        };
-    }).sort((a, b) => (b.lastModified).localeCompare(a.lastModified));
+    const rows: ConvRow[] = Object.entries(summaries)
+        .filter(([, s]) => (s.stepCount || 0) > 0 || Boolean(s.customTitle))
+        .map(([id, s]) => {
+            const ws: RawWorkspaceRef = (s.workspaces && s.workspaces[0]) || {};
+            const wsUri = ws.workspaceFolderAbsoluteUri || '';
+            let pid = s?.trajectoryMetadata?.projectId || '';
+            if (!pid && wsUri) {
+                const matchedId = folderToId.get(normUri(wsUri));
+                if (matchedId) pid = matchedId;
+            }
+            const proj = projById.get(pid);
+            const repoName = ws.repository?.computedName
+                ? String(ws.repository.computedName).split('/').pop()
+                : '';
+            const projectName = proj?.name || repoName || basename(wsUri) || '';
+            return {
+                id,
+                title: s.customTitle || cleanConversationTitle(s.summary),
+                projectId: pid,
+                projectName,
+                lastModified: s.lastModifiedTime || s.createdTime || '',
+                stepCount: s.stepCount || 0,
+            };
+        })
+        .sort((a, b) => (b.lastModified).localeCompare(a.lastModified));
 
     return { projects, rows };
 }
