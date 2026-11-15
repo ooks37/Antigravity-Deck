@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { classifyAccountTier } = require('../src/oauth-accounts');
+const { classifyAccountTier, buildQuotaPools } = require('../src/oauth-accounts');
 const { buildCliFallbackModels } = require('../src/routes/conversations');
 
 let passed = 0;
@@ -125,6 +125,27 @@ async function runTest(name, fn) {
         assert.strictEqual(res.defaultModel, 'gemini-4-argon-medium');
         assert.deepStrictEqual(res.groups.map((g) => g.name), ['Gemini', 'Claude', 'GPT / OpenAI']);
         assert.ok(res.groups[0].models.some((m) => m.modelId === 'gemini-pro-orchestrator-g1-pro'));
+
+        const pools = buildQuotaPools(res.models);
+        const poolById = Object.fromEntries(pools.map((p) => [p.id, p]));
+        assert.ok(poolById.gemini, 'Expected unified Gemini pool when Pro & Flash share quota');
+        assert.strictEqual(poolById.gemini.percent, 25);
+        assert.strictEqual(poolById.gemini.resetTime, '2026-11-15T16:13:31Z');
+        assert.ok(poolById.claude, 'Expected separate Claude pool');
+        assert.strictEqual(poolById.claude.percent, 90);
+        assert.strictEqual(poolById.claude.resetTime, '2026-11-15T19:12:06Z');
+    });
+
+    await runTest('buildQuotaPools splits Gemini Pro and Gemini Flash when their remainingFraction differs', () => {
+        const pools = buildQuotaPools([
+            { modelId: 'gemini-3.1-pro-high', remainingFraction: 0.15, resetTime: '2026-11-15T16:13:31Z' },
+            { modelId: 'gemini-3.8-flash-high', remainingFraction: 0.85, resetTime: '2026-11-15T18:00:00Z' },
+            { modelId: 'claude-opus-5-5-thinking', remainingFraction: 1.0, resetTime: '2026-11-15T19:37:47Z' },
+        ]);
+        const poolById = Object.fromEntries(pools.map((p) => [p.id, p]));
+        assert.strictEqual(poolById['gemini-pro']?.percent, 15);
+        assert.strictEqual(poolById['gemini-flash']?.percent, 85);
+        assert.strictEqual(poolById.claude?.percent, 100);
     });
 
     console.log(`\nResults: ${passed} passed, ${failed} failed\n`);

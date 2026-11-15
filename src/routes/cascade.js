@@ -188,7 +188,13 @@ module.exports = function setupCascadeRoutes(app) {
         if (denyIfUnauthorized(req, res, req.params.id)) return;
         try {
             const inst = resolveInst(req);
-            if (!inst) return res.status(503).json({ error: 'No language server connected' });
+            if (!inst) {
+                const { hasCliConversation } = require('../cli-history');
+                if (hasCliConversation(req.params.id)) {
+                    return res.json({ cascadeId: req.params.id, status: 'CASCADE_RUN_STATUS_IDLE', source: 'cli-db' });
+                }
+                return res.status(503).json({ error: 'No language server connected' });
+            }
             const data = await callApi('GetAllCascadeTrajectories', {}, inst);
             const traj = data.trajectorySummaries?.[req.params.id];
             if (!traj) return res.status(404).json({ error: 'Cascade not found' });
@@ -349,7 +355,7 @@ module.exports = function setupCascadeRoutes(app) {
         if (denyIfUnauthorized(req, res, req.params.id)) return;
         try {
             const inst = resolveInst(req);
-            if (!inst) return res.status(503).json({ error: 'No language server connected' });
+            if (!inst) return res.json({ generatorMetadata: [], mode: 'cli' });
             res.json(await callApi('GetCascadeTrajectoryGeneratorMetadata', {
                 cascadeId: req.params.id,
             }, inst));

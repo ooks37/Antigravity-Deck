@@ -463,6 +463,24 @@ export function AgentLogsView() {
                         payload: { step, index: data.index },
                     });
                 }
+            } else if (data.type === 'cli_stream_event') {
+                const evType = String(data.eventType || 'cli');
+                const label = evType === 'tool'
+                    ? `Tool: ${(data.name as string) || 'tool'} (${(data.status as string) || 'run'})`
+                    : evType === 'thinking'
+                        ? 'CLI Thinking'
+                        : `CLI ${evType}`;
+                const content = String(data.text || data.phase || data.name || '');
+                if (content) {
+                    addEvent({
+                        type: 'step',
+                        convId,
+                        stepRole: evType === 'tool' ? 'tool' : 'system',
+                        stepLabel: label,
+                        stepContent: content.slice(0, 240),
+                        payload: data,
+                    });
+                }
             }
         });
 

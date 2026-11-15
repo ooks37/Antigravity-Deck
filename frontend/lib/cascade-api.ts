@@ -67,12 +67,23 @@ export interface CascadeModel {
     resetTime?: string | null;
 }
 
+export interface QuotaPoolInfo {
+    id: string;
+    label: string;
+    shortLabel: string;
+    remainingFraction: number;
+    percent: number;
+    resetTime: string | null;
+    modelCount: number;
+}
+
 export interface ActiveModelAccount {
     alias: string | null;
     email: string | null;
     tierId: string;
     tierLabel: string;
     modelCount: number;
+    pools?: QuotaPoolInfo[];
 }
 
 // A display section mirroring the Antigravity IDE model picker (from clientModelSorts).
@@ -538,6 +549,7 @@ export interface OAuthAccountQuota {
     totalModels?: number;
     tierId?: string;
     tierLabel?: string;
+    pools?: QuotaPoolInfo[];
     models?: Array<{
         modelId: string;
         displayName: string;

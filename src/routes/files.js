@@ -12,6 +12,7 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 function resolveUploadTargetDir(workspaceHint) {
     const { lsInstances } = require('../config');
+    const { resolveWorkspacePathByName, discoverWorkspaces } = require('../ls-fallback');
     let rootDir = null;
     if (workspaceHint && typeof workspaceHint === 'string') {
         const clean = workspaceHint.trim();
@@ -21,16 +22,48 @@ function resolveUploadTargetDir(workspaceHint) {
             || uriToFsPath(i.workspaceFolderUri) === clean);
         if (matched) {
             rootDir = uriToFsPath(matched.workspaceFolderUri);
+        } else {
+            rootDir = resolveWorkspacePathByName(clean);
         }
     }
     if (!rootDir && lsInstances.length > 0) {
         rootDir = uriToFsPath(lsInstances[0].workspaceFolderUri);
+    }
+    if (!rootDir) {
+        const cliWorkspaces = discoverWorkspaces();
+        if (cliWorkspaces.length > 0) rootDir = cliWorkspaces[0].path;
     }
     if (rootDir && fs.existsSync(rootDir)) {
         return { baseDir: rootDir, uploadDir: path.join(rootDir, '.antigravity-uploads') };
     }
     const fallback = path.join(os.homedir(), '.gemini', 'antigravity-deck', 'uploads');
     return { baseDir: null, uploadDir: fallback };
+}
+
+function buildAllowedReadRoots() {
+    const { lsInstances, getSettings } = require('../config');
+    const { discoverWorkspaces } = require('../ls-fallback');
+    const settings = getSettings();
+    const allowedRoots = [];
+    const addRoot = (candidate) => {
+        if (!candidate) return;
+        try {
+            const real = fs.realpathSync(candidate);
+            if (!allowedRoots.includes(real)) allowedRoots.push(real);
+        } catch { }
+    };
+
+    if (settings.defaultWorkspaceRoot) addRoot(settings.defaultWorkspaceRoot);
+    for (const inst of lsInstances) {
+        if (inst.workspaceFolderUri) addRoot(uriToFsPath(inst.workspaceFolderUri));
+    }
+    for (const ws of discoverWorkspaces()) {
+        if (ws.path) addRoot(ws.path);
+    }
+    addRoot(path.join(os.homedir(), '.gemini', 'antigravity', 'brain'));
+    addRoot(path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'));
+    addRoot(path.join(os.homedir(), '.gemini', 'antigravity-deck', 'uploads'));
+    return allowedRoots;
 }
 
 module.exports = function setupFilesRoutes(app) {
@@ -58,12 +91,23 @@ module.exports = function setupFilesRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // POST /api/media/save — SaveMediaAsArtifact proxy
+    // POST /api/media/save — SaveMediaAsArtifact proxy (with local filesystem fallback in headless CLI mode)
     app.post('/api/media/save', async (req, res) => {
         try {
             const { mimeType, inlineData, thumbnail } = req.body;
             if (!inlineData) return res.status(400).json({ error: 'inlineData is required' });
             const inst = resolveInst(req);
+            if (!inst) {
+                const { pathToFileUri } = require('../ls-fallback');
+                const { uploadDir } = resolveUploadTargetDir(req.query?.workspace || req.body?.workspace);
+                fs.mkdirSync(uploadDir, { recursive: true });
+                const extMap = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
+                const ext = extMap[mimeType] || '.png';
+                const filePath = path.join(uploadDir, `media-${Date.now()}${ext}`);
+                const rawB64 = String(inlineData).replace(/^data:[^;]+;base64,/, '');
+                fs.writeFileSync(filePath, Buffer.from(rawB64, 'base64'));
+                return res.json({ uri: pathToFileUri(filePath), path: filePath });
+            }
             const result = await callApi('SaveMediaAsArtifact', {
                 media: { mimeType: mimeType || 'image/png', inlineData, thumbnail: thumbnail || '' }
             }, inst);
@@ -99,36 +143,8 @@ module.exports = function setupFilesRoutes(app) {
                 return res.status(400).json({ error: 'Invalid file path' });
             }
 
-            // Security: Only allow reading files within workspace directories
-            // Build allowed roots: defaultWorkspaceRoot (from settings) + all active workspace folders + .gemini brain
-            const { lsInstances, getSettings } = require('../config');
-            const settings = getSettings();
-            const allowedRoots = [];
-
-            // 1. Default workspace root from settings
-            if (settings.defaultWorkspaceRoot) {
-                try {
-                    allowedRoots.push(fs.realpathSync(settings.defaultWorkspaceRoot));
-                } catch { /* skip if root doesn't exist */ }
-            }
-
-            // 2. All active workspace folder paths (resolved through symlinks)
-            for (const inst of lsInstances) {
-                if (inst.workspaceFolderUri) {
-                    const fsPath = uriToFsPath(inst.workspaceFolderUri);
-                    if (fsPath) {
-                        try {
-                            allowedRoots.push(fs.realpathSync(fsPath));
-                        } catch { /* skip unreachable workspaces */ }
-                    }
-                }
-            }
-
-            // 3. .gemini brain directory (generated images, artifacts, conversation data)
-            const geminiBrainDir = path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
-            try {
-                allowedRoots.push(fs.realpathSync(geminiBrainDir));
-            } catch { /* skip if doesn't exist */ }
+            // Security: Only allow reading files within workspace directories and brain/uploads dirs
+            const allowedRoots = buildAllowedReadRoots();
 
             // Deny if no workspace roots configured — nothing to allow
             if (allowedRoots.length === 0) {
@@ -191,21 +207,8 @@ module.exports = function setupFilesRoutes(app) {
                 return res.status(400).json({ error: 'Invalid file path' });
             }
 
-            // Build allowed roots (same as GET /api/file/serve)
-            const { lsInstances, getSettings } = require('../config');
-            const settings = getSettings();
-            const allowedRoots = [];
-            if (settings.defaultWorkspaceRoot) {
-                try { allowedRoots.push(fs.realpathSync(settings.defaultWorkspaceRoot)); } catch { }
-            }
-            for (const inst of lsInstances) {
-                if (inst.workspaceFolderUri) {
-                    const fsPath = uriToFsPath(inst.workspaceFolderUri);
-                    if (fsPath) { try { allowedRoots.push(fs.realpathSync(fsPath)); } catch { } }
-                }
-            }
-            const geminiBrainDir = path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
-            try { allowedRoots.push(fs.realpathSync(geminiBrainDir)); } catch { }
+            // Build allowed roots (same as POST /api/file/read)
+            const allowedRoots = buildAllowedReadRoots();
 
             if (allowedRoots.length === 0) {
                 return res.status(403).json({ error: 'Access denied: no workspace configured' });
@@ -274,20 +277,7 @@ module.exports = function setupFilesRoutes(app) {
             }
 
             // Build allowed roots (same as POST /api/file/read)
-            const { lsInstances, getSettings } = require('../config');
-            const settings = getSettings();
-            const allowedRoots = [];
-            if (settings.defaultWorkspaceRoot) {
-                try { allowedRoots.push(fs.realpathSync(settings.defaultWorkspaceRoot)); } catch { }
-            }
-            for (const inst of lsInstances) {
-                if (inst.workspaceFolderUri) {
-                    const fsPath = uriToFsPath(inst.workspaceFolderUri);
-                    if (fsPath) { try { allowedRoots.push(fs.realpathSync(fsPath)); } catch { } }
-                }
-            }
-            const geminiBrainDir = path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
-            try { allowedRoots.push(fs.realpathSync(geminiBrainDir)); } catch { }
+            const allowedRoots = buildAllowedReadRoots();
 
             if (allowedRoots.length === 0) {
                 return res.status(403).json({ error: 'Access denied: no workspace configured' });

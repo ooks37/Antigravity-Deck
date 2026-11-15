@@ -47,16 +47,27 @@ module.exports = function setupWorkspacesRoutes(app) {
         res.json(getResourceSnapshot());
     });
 
-    // Workspace list — all detected LS instances
+    // Workspace list — all detected LS instances, or local CLI workspaces in headless mode
     app.get('/api/workspaces', (req, res) => {
         const { lsInstances } = require('../config');
-        res.json(lsInstances.map((inst) => ({
-            pid: inst.pid,
-            workspaceId: inst.workspaceId,
-            workspaceName: inst.workspaceName,
-            workspaceFolderUri: inst.workspaceFolderUri || '',
-            category: inst.category || 'workspace',
-            port: inst.port,
+        if (lsInstances.length > 0) {
+            return res.json(lsInstances.map((inst) => ({
+                pid: inst.pid,
+                workspaceId: inst.workspaceId,
+                workspaceName: inst.workspaceName,
+                workspaceFolderUri: inst.workspaceFolderUri || '',
+                category: inst.category || 'workspace',
+                port: inst.port,
+            })));
+        }
+        const { discoverWorkspaces } = require('../ls-fallback');
+        res.json(discoverWorkspaces().map((w) => ({
+            pid: 'cli',
+            workspaceId: w.name,
+            workspaceName: w.name,
+            workspaceFolderUri: w.workspaceUri || '',
+            category: 'workspace',
+            port: null,
         })));
     });
 
@@ -131,6 +142,21 @@ module.exports = function setupWorkspacesRoutes(app) {
         };
 
         let hub = getHub();
+
+        // Headless CLI mode: folder already created on disk; no desktop IDE hub needed
+        if (!hub && process.env.ENABLE_IDE_HUB === 'false') {
+            return res.json({
+                created: true,
+                workspace: {
+                    pid: 'cli',
+                    workspaceId: path.basename(folderPath),
+                    workspaceName: path.basename(folderPath),
+                    workspaceFolderUri: folderUri,
+                    category: 'workspace',
+                    port: null,
+                },
+            });
+        }
 
         // Cold start: no hub yet → launch the IDE and wait for the hub to come up.
         if (!hub) {

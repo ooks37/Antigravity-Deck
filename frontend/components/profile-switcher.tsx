@@ -145,6 +145,15 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
             setActive(data.active || null);
             setEnv(data.environment || null);
             setOAuth(data.oauth || null);
+            if (Array.isArray(data.oauth?.accounts)) {
+                setQuotaMap((prev) => {
+                    const next = { ...prev };
+                    for (const acc of data.oauth!.accounts) {
+                        if (acc.quota) next[acc.alias] = acc.quota;
+                    }
+                    return next;
+                });
+            }
             setError(null);
 
             if (!didPickDefaultTab) {
@@ -752,9 +761,30 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
                                                             {acc.name && acc.email && !acc.email.startsWith(acc.name) ? ` · ${acc.name}` : ''}
                                                         </p>
                                                         {quotaMap[acc.alias] && (
-                                                            <div className="mt-1.5 flex items-center gap-2 text-[10px]">
+                                                            <div className="mt-1.5 flex items-center gap-2 text-[10px] flex-wrap">
                                                                 {quotaMap[acc.alias].error ? (
                                                                     <span className="text-amber-500">配额检测失败: {quotaMap[acc.alias].error}</span>
+                                                                ) : Array.isArray(quotaMap[acc.alias].pools) && quotaMap[acc.alias].pools!.length > 0 ? (
+                                                                    quotaMap[acc.alias].pools!.map((pool) => {
+                                                                        const pct = pool.percent ?? Math.round((pool.remainingFraction ?? 1) * 100);
+                                                                        return (
+                                                                            <div
+                                                                                key={pool.id}
+                                                                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-border/50 bg-background/60"
+                                                                            >
+                                                                                <span className="text-muted-foreground">{pool.label}</span>
+                                                                                <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
+                                                                                    <div
+                                                                                        className={`h-full rounded-full ${pct > 50 ? 'bg-emerald-500' : pct > 15 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                                                                        style={{ width: `${Math.max(2, pct)}%` }}
+                                                                                    />
+                                                                                </div>
+                                                                                <span className={`font-mono font-semibold ${pct > 50 ? 'text-emerald-400' : pct > 15 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                                                                    {pct}%
+                                                                                </span>
+                                                                            </div>
+                                                                        );
+                                                                    })
                                                                 ) : (
                                                                     <>
                                                                         <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -764,7 +794,7 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
                                                                             />
                                                                         </div>
                                                                         <span className="text-muted-foreground font-mono">
-                                                                            均值 {Math.round((quotaMap[acc.alias].avgQuota ?? 0) * 100)}% · 最低 {Math.round((quotaMap[acc.alias].minQuota ?? 0) * 100)}%
+                                                                            最低 {Math.round((quotaMap[acc.alias].minQuota ?? 0) * 100)}%
                                                                             {(quotaMap[acc.alias].exhaustedCount ?? 0) > 0 ? ` (${quotaMap[acc.alias].exhaustedCount} 项耗尽)` : ''}
                                                                         </span>
                                                                     </>

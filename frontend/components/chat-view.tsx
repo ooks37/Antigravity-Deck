@@ -70,7 +70,7 @@ import { ProcessingGroup } from './chat/processing-group';
 import { GeneratedImageStep } from './chat/generated-image-step';
 import { StreamingIndicator } from './chat/streaming-indicator';
 import { DoubaoWelcome } from './chat/doubao-welcome';
-import { TieredModelPicker, EffortPicker } from './chat/tiered-model-picker';
+import { TieredModelPicker, EffortPicker, QuotaPoolsPill } from './chat/tiered-model-picker';
 import { AccountSwitcherPill } from './chat/account-switcher-pill';
 import {
     type EffortLevel,
@@ -517,6 +517,23 @@ export function ChatView({
 
         // Real-time SSE streaming via agy CLI (default mode when Hub IDE is disabled/offline, or toggled)
         if (useAgyCli || !detected) {
+            if (pendingImages.length > 0) {
+                const imgPaths: string[] = [];
+                for (const img of pendingImages) {
+                    try {
+                        const uploaded = await uploadWorkspaceFile({
+                            name: img.name || `image-${Date.now()}.png`,
+                            contentBase64: `data:${img.mimeType};base64,${img.base64}`,
+                            workspace: currentWorkspace || undefined,
+                            mimeType: img.mimeType || 'image/png',
+                        });
+                        if (uploaded?.path) imgPaths.push(`- ${img.name || 'image'}: ${uploaded.path}`);
+                    } catch { /* ignore individual image upload error */ }
+                }
+                if (imgPaths.length > 0) {
+                    text = `${text || '请分析附加的图片。'}\n\n[已附加图片到工作区]\n${imgPaths.join('\n')}`;
+                }
+            }
             const turnId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             const startedAt = Date.now();
             const controller = new AbortController();
@@ -1248,6 +1265,14 @@ export function ChatView({
                                 )}
 
                                 <div className="flex-1" />
+
+                                {/* Separate multi-pool quota pill on the right side by percentage */}
+                                <QuotaPoolsPill
+                                    models={models}
+                                    activeAccount={activeAccount}
+                                    onRefresh={refreshActiveModels}
+                                    onRotate={isAdmin ? handleQuickRotateAccount : undefined}
+                                />
 
                                 {/* New chat button */}
                                 <Button

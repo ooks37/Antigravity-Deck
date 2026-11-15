@@ -188,9 +188,9 @@ export function PermissionsPanel() {
                             'text-[10px] px-2 py-0.5 rounded-full font-mono border',
                             ideStatus.lsDetected
                                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : 'bg-sky-500/10 text-sky-400 border-sky-500/30'
                         )}>
-                            {ideStatus.lsDetected ? `LS 在线 :${ideStatus.port}` : 'LS 未连接'}
+                            {ideStatus.lsDetected ? `LS 在线 :${ideStatus.port}` : 'CLI 独立模式'}
                         </span>
                     )}
                 </div>
@@ -214,7 +214,7 @@ export function PermissionsPanel() {
                         </div>
                         <p className="text-[11px] text-muted-foreground">
                             {ideStatus
-                                ? `IDE 安装: ${ideStatus.ideInstalled ? '是' : '否'} · 进程: ${ideStatus.ideRunning ? '运行中' : '未运行'} · LS Hub: ${ideStatus.lsDetected ? '已就绪' : '重连中'}`
+                                ? `IDE 安装: ${ideStatus.ideInstalled ? '是' : '否'} · 进程: ${ideStatus.ideRunning ? '运行中' : 'CLI 直连'} · 运行模式: ${ideStatus.lsDetected ? 'LS Hub 已就绪' : 'CLI 独立运行'}`
                                 : '正在探测守护状态...'}
                         </p>
                     </div>

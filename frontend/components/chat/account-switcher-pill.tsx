@@ -262,14 +262,37 @@ export function AccountSwitcherPill({
                                         </div>
 
                                         <div className="flex items-center gap-1.5 shrink-0">
-                                            {avgPct !== null && (
+                                            {Array.isArray(q?.pools) && q!.pools!.length > 0 ? (
+                                                <div className="flex items-center gap-1">
+                                                    {q!.pools!.map((pool) => {
+                                                        const pct = pool.percent ?? Math.round((pool.remainingFraction ?? 1) * 100);
+                                                        const shortTag = pool.id.startsWith('gemini') ? 'G' : pool.id === 'claude' ? 'C' : (pool.shortLabel || pool.label).slice(0, 2);
+                                                        return (
+                                                            <span
+                                                                key={pool.id}
+                                                                className={cn(
+                                                                    'text-[9px] font-mono px-1 py-0.2 rounded border',
+                                                                    pct > 50
+                                                                        ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10'
+                                                                        : pct > 15
+                                                                            ? 'text-amber-400 border-amber-500/25 bg-amber-500/10'
+                                                                            : 'text-rose-400 border-rose-500/25 bg-rose-500/10'
+                                                                )}
+                                                                title={`${pool.label} 池剩余 ${pct}%`}
+                                                            >
+                                                                {shortTag} {pct}%
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : avgPct !== null ? (
                                                 <span className={cn(
                                                     'text-[10px] font-mono',
                                                     avgPct <= 15 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'
                                                 )}>
                                                     {avgPct}%
                                                 </span>
-                                            )}
+                                            ) : null}
                                             {isSwitchingThis ? (
                                                 <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                                             ) : acc.isActive ? (

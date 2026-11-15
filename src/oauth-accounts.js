@@ -440,18 +440,29 @@ function getCurrentOAuthStatusSync(opts = {}) {
     };
 }
 
+let lastBackgroundWarmAt = 0;
+
 function listOAuthAccounts(opts = {}) {
     const paths = resolvePaths(opts);
     const status = getCurrentOAuthStatusSync(opts);
     const accounts = listAccountFiles(paths);
     let activeAlias = null;
     const activeLower = status.activeEmail ? status.activeEmail.toLowerCase() : null;
+    let hasUncached = false;
     const enriched = accounts.map((acc) => {
         const isActive = Boolean(activeLower && acc.email && acc.email.toLowerCase() === activeLower);
         if (isActive && !activeAlias) activeAlias = acc.alias;
         const cachedQuota = formatCachedQuota(quotaCache.get(acc.alias) || null, false);
+        if (!cachedQuota) hasUncached = true;
         return { ...acc, isActive, quota: cachedQuota };
     });
+    // Non-blocking background warmup on live server when any account lacks cached quota
+    if (hasUncached && (!opts || Object.keys(opts).length === 0) && Date.now() - lastBackgroundWarmAt > 60000) {
+        lastBackgroundWarmAt = Date.now();
+        setImmediate(() => {
+            warmAllAccountQuotas().catch(() => {});
+        });
+    }
     return {
         ...status,
         activeAlias,
@@ -762,7 +773,92 @@ function isInternalOrNoiseModel(id, info) {
     if (info?.isInternal) return true;
     if (id.endsWith('-disabled')) return true;
     if (id.startsWith('tab_') || id.startsWith('chat_')) return true;
+    if (/-image$/i.test(id)) return true;
     return false;
+}
+
+/**
+ * Group models into independent quota pools (Gemini / Gemini Pro / Gemini Flash / Claude / GPT)
+ * since CloudCode tracks separate rate-limit buckets per model family rather than a single global pool.
+ */
+function buildQuotaPools(models = []) {
+    const normalizeItem = (m) => {
+        const id = String(m.modelId || m.cliModelId || m.id || '').toLowerCase();
+        const label = String(m.displayName || m.label || id);
+        const frac = typeof m.remainingFraction === 'number'
+            ? m.remainingFraction
+            : (typeof m.quota === 'number' ? m.quota : null);
+        return { id, label, frac, resetTime: m.resetTime || null };
+    };
+
+    const valid = (Array.isArray(models) ? models : [])
+        .map(normalizeItem)
+        .filter((m) => m.id && !isInternalOrNoiseModel(m.id, {}) && typeof m.frac === 'number');
+
+    const geminiPro = [];
+    const geminiFlash = [];
+    const claude = [];
+    const gpt = [];
+
+    for (const m of valid) {
+        const hay = `${m.id} ${m.label.toLowerCase()}`;
+        if (hay.includes('claude')) {
+            claude.push(m);
+        } else if (hay.includes('gpt') || hay.includes('openai')) {
+            gpt.push(m);
+        } else if (hay.includes('gemini') || hay.includes('argon') || hay.includes('hydrogen') || hay.includes('orchestrator')) {
+            if (/pro|argon|hydrogen|orchestrator/i.test(hay) && !/flash/i.test(hay)) {
+                geminiPro.push(m);
+            } else {
+                geminiFlash.push(m);
+            }
+        }
+    }
+
+    const summarizeBucket = (id, label, shortLabel, list) => {
+        if (!list.length) return null;
+        const minFrac = Math.min(...list.map((x) => x.frac));
+        const clamped = Math.max(0, Math.min(1, minFrac));
+        const resetTimes = list.map((x) => x.resetTime).filter(Boolean).sort();
+        return {
+            id,
+            label,
+            shortLabel,
+            remainingFraction: Math.round(clamped * 10000) / 10000,
+            percent: Math.round(clamped * 100),
+            resetTime: resetTimes[0] || null,
+            modelCount: list.length,
+        };
+    };
+
+    const pools = [];
+    const proPool = summarizeBucket('gemini-pro', 'Gemini Pro', 'G-Pro', geminiPro);
+    const flashPool = summarizeBucket('gemini-flash', 'Gemini Flash', 'G-Flash', geminiFlash);
+
+    if (proPool && flashPool && Math.abs(proPool.remainingFraction - flashPool.remainingFraction) > 0.015) {
+        pools.push(proPool, flashPool);
+    } else {
+        const allGemini = [...geminiPro, ...geminiFlash];
+        const gemPool = summarizeBucket('gemini', 'Gemini', 'G', allGemini);
+        if (gemPool) pools.push(gemPool);
+    }
+
+    const claudePool = summarizeBucket('claude', 'Claude', 'C', claude);
+    const gptPool = summarizeBucket('gpt', 'GPT', 'GPT', gpt);
+
+    if (claudePool && gptPool) {
+        if (Math.abs(claudePool.remainingFraction - gptPool.remainingFraction) > 0.015) {
+            pools.push(claudePool, gptPool);
+        } else {
+            pools.push(claudePool);
+        }
+    } else if (claudePool) {
+        pools.push(claudePool);
+    } else if (gptPool) {
+        pools.push(gptPool);
+    }
+
+    return pools;
 }
 
 function classifyAccountTier({ loadCodeAssist = null, modelsMap = {}, agyModels = [], userStatus = null } = {}) {
@@ -851,11 +947,17 @@ function classifyAccountTier({ loadCodeAssist = null, modelsMap = {}, agyModels 
 
 async function fetchAccountQuota(alias, opts = {}) {
     const paths = resolvePaths(opts);
-    const found = findAccountFile(paths, alias);
-    if (!found) {
+    const isDirectActive = alias === '__active__';
+    const found = isDirectActive ? null : findAccountFile(paths, alias);
+    if (!isDirectActive && !found) {
         throw new Error(`未找到已保存的 OAuth 账号 "${alias}"`);
     }
-    let raw = readJsonSafe(found.targetPath);
+    let raw = isDirectActive
+        ? await readActiveCredentialObject(opts)
+        : readJsonSafe(found.targetPath);
+    if (!raw) {
+        throw new Error(`未找到可用的 OAuth 凭据 "${alias}"`);
+    }
     normalizeCredentialData(raw);
     let meta = extractAccountMeta(raw);
 
@@ -864,7 +966,9 @@ async function fetchAccountQuota(alias, opts = {}) {
         if (refreshed.refreshed) {
             raw = refreshed.data;
             meta = extractAccountMeta(raw);
-            writeSecretJsonFile(found.targetPath, raw);
+            if (found?.targetPath) {
+                writeSecretJsonFile(found.targetPath, raw);
+            }
         }
     }
 
@@ -914,10 +1018,13 @@ async function fetchAccountQuota(alias, opts = {}) {
             recommended: !!info?.recommended,
             supportsImages: !!info?.supportsImages,
             supportsThinking: !!info?.supportsThinking,
+            tagTitle: info?.tagTitle || '',
+            tagDescription: info?.tagDescription || '',
             modelPlaceholder: info?.model || null,
         };
     });
 
+    const pools = buildQuotaPools(models);
     const withQuota = models.filter((m) => typeof m.remainingFraction === 'number');
     const avgQuota = withQuota.length
         ? Math.round((withQuota.reduce((s, m) => s + m.remainingFraction, 0) / withQuota.length) * 100) / 100
@@ -932,8 +1039,9 @@ async function fetchAccountQuota(alias, opts = {}) {
         modelsMap: rawModelsMap,
     });
 
+    const cacheKey = isDirectActive ? '__active__' : found.cleanAlias;
     const summary = {
-        alias: found.cleanAlias,
+        alias: isDirectActive ? (meta.name || meta.email?.split('@')[0] || 'active') : found.cleanAlias,
         email: meta.email,
         fetchedAt: new Date().toISOString(),
         avgQuota,
@@ -943,9 +1051,10 @@ async function fetchAccountQuota(alias, opts = {}) {
         tierId: tierInfo.tierId,
         tierLabel: tierInfo.tierLabel,
         tierInfo,
-        models: models.slice(0, 32),
+        pools,
+        models,
     };
-    quotaCache.set(found.cleanAlias, { ...summary, rawModelsMap });
+    quotaCache.set(cacheKey, { ...summary, rawModelsMap });
     return opts.includeRaw ? { ...summary, rawModelsMap } : summary;
 }
 
@@ -959,17 +1068,18 @@ function formatCachedQuota(cached, includeRaw) {
 async function getActiveAccountQuotaSummary({ forceRefresh = false, includeRaw = true } = {}, opts = {}) {
     const overview = listOAuthAccounts(opts);
     const activeAcc = (overview.accounts || []).find((a) => a.isActive);
-    if (!activeAcc) return null;
-    const cached = !forceRefresh ? quotaCache.get(activeAcc.alias) : null;
+    const targetAlias = activeAcc ? activeAcc.alias : (overview.hasCurrentCreds ? '__active__' : null);
+    if (!targetAlias) return null;
+    const cached = !forceRefresh ? quotaCache.get(targetAlias) : null;
     const ageMs = cached ? (Date.now() - Date.parse(cached.fetchedAt || 0)) : Infinity;
     const runRefresh = () => {
         const canCoalesce = !opts || Object.keys(opts).length === 0;
-        if (canCoalesce && quotaInFlight.has(activeAcc.alias)) {
-            return quotaInFlight.get(activeAcc.alias);
+        if (canCoalesce && quotaInFlight.has(targetAlias)) {
+            return quotaInFlight.get(targetAlias);
         }
-        const p = fetchAccountQuota(activeAcc.alias, { ...opts, includeRaw: true })
-            .finally(() => { if (canCoalesce) quotaInFlight.delete(activeAcc.alias); });
-        if (canCoalesce) quotaInFlight.set(activeAcc.alias, p);
+        const p = fetchAccountQuota(targetAlias, { ...opts, includeRaw: true })
+            .finally(() => { if (canCoalesce) quotaInFlight.delete(targetAlias); });
+        if (canCoalesce) quotaInFlight.set(targetAlias, p);
         return p;
     };
 
@@ -991,6 +1101,17 @@ async function getActiveAccountQuotaSummary({ forceRefresh = false, includeRaw =
     }
 }
 
+async function warmAllAccountQuotas(opts = {}) {
+    const paths = resolvePaths(opts);
+    const accounts = listAccountFiles(paths);
+    await Promise.allSettled(accounts.map((acc) => {
+        const cached = quotaCache.get(acc.alias);
+        const ageMs = cached ? (Date.now() - Date.parse(cached.fetchedAt || 0)) : Infinity;
+        if (cached && ageMs < 600000) return Promise.resolve(cached);
+        return fetchAccountQuota(acc.alias, { ...opts, includeRaw: true });
+    }));
+}
+
 async function rotateOAuthAccount(opts = {}) {
     const overview = listOAuthAccounts(opts);
     const accounts = overview.accounts || [];
@@ -1002,12 +1123,16 @@ async function rotateOAuthAccount(opts = {}) {
         ? [...accounts.slice(currentIdx + 1), ...accounts.slice(0, currentIdx)]
         : accounts;
 
-    // Prefer an account whose cached quota is not exhausted and has a refresh token
+    // Prefer an account where NO independent model quota pool is exhausted
     const candidate = ordered.find((a) => {
         const q = quotaCache.get(a.alias);
-        if (q && q.avgQuota !== null && q.avgQuota <= 0.02) return false;
+        if (q) {
+            if (typeof q.minQuota === 'number' && q.minQuota <= 0.02) return false;
+            if (Array.isArray(q.pools) && q.pools.some((p) => p.remainingFraction <= 0.02)) return false;
+            if (q.avgQuota !== null && q.avgQuota <= 0.02) return false;
+        }
         return a.hasRefreshToken || !a.isExpired;
-    }) || ordered[0];
+    }) || ordered.find((a) => a.hasRefreshToken || !a.isExpired) || ordered[0];
 
     const switchResult = await useOAuthAccount(candidate.alias, {
         ...opts,
@@ -1241,6 +1366,8 @@ module.exports = {
     getActiveAccountQuotaSummary,
     classifyAccountTier,
     isInternalOrNoiseModel,
+    buildQuotaPools,
+    warmAllAccountQuotas,
     rotateOAuthAccount,
     startWebOAuthFlow,
     completeWebOAuthFlow,

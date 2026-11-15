@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
-import type { ActiveModelAccount, CascadeModel, CascadeModelGroup } from '@/lib/cascade-api';
+import type { ActiveModelAccount, CascadeModel, CascadeModelGroup, QuotaPoolInfo } from '@/lib/cascade-api';
 import {
     groupModelsByFamily,
     findFamilyByModelId,
@@ -15,7 +15,7 @@ import {
     type ModelFamily,
 } from '@/lib/model-tiers';
 import { cn } from '@/lib/utils';
-import { Sparkles, CircleDot, Bot, ChevronDown, Check, Clock, Zap, Brain, Loader2 } from 'lucide-react';
+import { Sparkles, CircleDot, Bot, ChevronDown, Check, Clock, Zap, Brain, Loader2, RefreshCw, Repeat2 } from 'lucide-react';
 
 interface TieredModelPickerProps {
     models: CascadeModel[];
@@ -41,6 +41,261 @@ function ProviderIcon({ provider }: { provider: 'gemini' | 'claude' | 'openai' |
     if (provider === 'claude') return <CircleDot className="h-3.5 w-3.5 text-violet-500 shrink-0" />;
     if (provider === 'openai') return <CircleDot className="h-3.5 w-3.5 text-emerald-500 shrink-0" />;
     return <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
+}
+
+export function deriveQuotaPools(models: CascadeModel[], activeAccount?: ActiveModelAccount | null): QuotaPoolInfo[] {
+    if (Array.isArray(activeAccount?.pools) && activeAccount!.pools.length > 0) {
+        return activeAccount!.pools;
+    }
+    const defs = [
+        { id: 'gemini-pro', label: 'Gemini Pro', shortLabel: 'G·Pro', match: (s: string) => /gemini/i.test(s) && !/flash/i.test(s) },
+        { id: 'gemini-flash', label: 'Gemini Flash', shortLabel: 'G·Flash', match: (s: string) => /gemini/i.test(s) && /flash/i.test(s) },
+        { id: 'claude', label: 'Claude', shortLabel: 'Claude', match: (s: string) => /claude/i.test(s) },
+        { id: 'gpt', label: 'GPT', shortLabel: 'GPT', match: (s: string) => /gpt/i.test(s) },
+    ];
+    const rawPools: QuotaPoolInfo[] = [];
+    for (const def of defs) {
+        const matched = models.filter((m) => def.match(`${m.cliModelId || ''} ${m.modelId || ''} ${m.label || ''}`));
+        if (!matched.length) continue;
+        const quotas = matched.map((m) => m.quota).filter((q): q is number => typeof q === 'number' && Number.isFinite(q));
+        const minQ = quotas.length ? Math.min(...quotas) : 1;
+        const resetTime = matched.map((m) => m.resetTime).find(Boolean) || null;
+        rawPools.push({
+            id: def.id,
+            label: def.label,
+            shortLabel: def.shortLabel,
+            remainingFraction: minQ,
+            percent: Math.round(minQ * 100),
+            resetTime,
+            modelCount: matched.length,
+        });
+    }
+    const gPro = rawPools.find((p) => p.id === 'gemini-pro');
+    const gFlash = rawPools.find((p) => p.id === 'gemini-flash');
+    if (gPro && gFlash && Math.abs(gPro.remainingFraction - gFlash.remainingFraction) <= 0.015) {
+        const minQ = Math.min(gPro.remainingFraction, gFlash.remainingFraction);
+        const merged: QuotaPoolInfo = {
+            id: 'gemini',
+            label: 'Gemini',
+            shortLabel: 'Gemini',
+            remainingFraction: minQ,
+            percent: Math.round(minQ * 100),
+            resetTime: gPro.resetTime || gFlash.resetTime || null,
+            modelCount: gPro.modelCount + gFlash.modelCount,
+        };
+        return [merged, ...rawPools.filter((p) => p.id !== 'gemini-pro' && p.id !== 'gemini-flash')];
+    }
+    if (gPro && !gFlash) {
+        gPro.id = 'gemini';
+        gPro.label = 'Gemini';
+        gPro.shortLabel = 'Gemini';
+    } else if (gFlash && !gPro) {
+        gFlash.id = 'gemini';
+        gFlash.label = 'Gemini';
+        gFlash.shortLabel = 'Gemini';
+    }
+    return rawPools;
+}
+
+export function QuotaPoolsPill({
+    models,
+    activeAccount,
+    onRefresh,
+    onRotate,
+}: {
+    models: CascadeModel[];
+    activeAccount?: ActiveModelAccount | null;
+    onRefresh?: () => Promise<void> | void;
+    onRotate?: () => Promise<void> | void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [busy, setBusy] = useState<'refresh' | 'rotate' | null>(null);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const onMouseDown = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener('mousedown', onMouseDown);
+        return () => document.removeEventListener('mousedown', onMouseDown);
+    }, [open]);
+
+    const pools = useMemo(() => deriveQuotaPools(models, activeAccount), [models, activeAccount]);
+    const families = useMemo(() => groupModelsByFamily(models), [models]);
+
+    if (pools.length === 0) return null;
+
+    const handleRefresh = async () => {
+        if (!onRefresh || busy) return;
+        setBusy('refresh');
+        try {
+            await onRefresh();
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const handleRotate = async () => {
+        if (!onRotate || busy) return;
+        setBusy('rotate');
+        try {
+            await onRotate();
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    return (
+        <div ref={ref} className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className={cn(
+                    'flex items-center gap-1.5 h-6 px-2 rounded-md border text-[11px] font-medium transition-colors cursor-pointer select-none',
+                    open
+                        ? 'bg-muted/80 text-foreground border-border'
+                        : 'bg-muted/30 text-muted-foreground hover:text-foreground hover:bg-muted/60 border-border/50'
+                )}
+                title="各模型池独立剩余额度百分比（点击查看详情与重置时间）"
+            >
+                <span className="text-[10px] text-muted-foreground/70 hidden sm:inline">额度</span>
+                {pools.map((pool, idx) => {
+                    const pct = pool.percent ?? Math.round((pool.remainingFraction ?? 1) * 100);
+                    return (
+                        <span key={pool.id} className="inline-flex items-center gap-1">
+                            {idx > 0 && <span className="text-muted-foreground/30">·</span>}
+                            <span
+                                className={cn(
+                                    'w-1.5 h-1.5 rounded-full shrink-0',
+                                    pct > 50 ? 'bg-emerald-400' : pct > 15 ? 'bg-amber-400' : 'bg-rose-400'
+                                )}
+                            />
+                            <span className="text-[10px] text-muted-foreground font-normal">{pool.shortLabel || pool.label}</span>
+                            <span
+                                className={cn(
+                                    'font-mono text-[10px] font-semibold',
+                                    pct > 50 ? 'text-emerald-400' : pct > 15 ? 'text-amber-400' : 'text-rose-400'
+                                )}
+                            >
+                                {pct}%
+                            </span>
+                        </span>
+                    );
+                })}
+            </button>
+
+            {open && (
+                <div className="absolute bottom-full right-0 mb-1.5 w-[290px] max-w-[90vw] rounded-xl border border-border bg-popover/95 backdrop-blur-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-1 duration-150">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/50 bg-muted/20">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[11px] font-semibold text-foreground">分池模型额度</span>
+                            {activeAccount?.tierLabel && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-medium truncate">
+                                    {activeAccount.tierLabel}
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                            {onRotate && (
+                                <button
+                                    type="button"
+                                    onClick={handleRotate}
+                                    disabled={busy !== null}
+                                    className="inline-flex items-center gap-1 h-5 px-1.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition-colors cursor-pointer disabled:opacity-40"
+                                    title="切换到额度更高的账号"
+                                >
+                                    <Repeat2 className={cn('w-2.5 h-2.5', busy === 'rotate' && 'animate-spin')} />
+                                    换号
+                                </button>
+                            )}
+                            {onRefresh && (
+                                <button
+                                    type="button"
+                                    onClick={handleRefresh}
+                                    disabled={busy !== null}
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer disabled:opacity-40"
+                                    title="实时刷新 CloudCode 分池额度"
+                                >
+                                    <RefreshCw className={cn('w-3 h-3', busy === 'refresh' && 'animate-spin')} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Independent Quota Pools */}
+                    <div className="p-2.5 space-y-2 border-b border-border/40">
+                        {pools.map((pool) => {
+                            const pct = pool.percent ?? Math.round((pool.remainingFraction ?? 1) * 100);
+                            const resetText = formatResetCountdown(pool.resetTime);
+                            return (
+                                <div key={pool.id} className="rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <span
+                                                className={cn(
+                                                    'w-2 h-2 rounded-full shrink-0',
+                                                    pct > 50 ? 'bg-emerald-400' : pct > 15 ? 'bg-amber-400' : 'bg-rose-400'
+                                                )}
+                                            />
+                                            <span className="text-xs font-medium text-foreground">{pool.label} 池</span>
+                                            {resetText && (
+                                                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/75">
+                                                    <Clock className="w-2.5 h-2.5" />
+                                                    {resetText}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <span
+                                            className={cn(
+                                                'text-xs font-mono font-bold shrink-0',
+                                                pct > 50 ? 'text-emerald-400' : pct > 15 ? 'text-amber-400' : 'text-rose-400'
+                                            )}
+                                        >
+                                            {pct}%
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                                        <div
+                                            className={cn(
+                                                'h-full rounded-full transition-all',
+                                                pct > 50 ? 'bg-emerald-400' : pct > 15 ? 'bg-amber-400' : 'bg-rose-400'
+                                            )}
+                                            style={{ width: `${Math.max(2, pct)}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Per-family breakdown on right side by percentage */}
+                    <div className="max-h-[180px] overflow-y-auto px-2.5 py-2 space-y-1">
+                        <div className="text-[10px] text-muted-foreground/70 px-1 pb-0.5 flex items-center justify-between">
+                            <span>模型系列明细</span>
+                            <span>剩余百分比</span>
+                        </div>
+                        {families.map((fam) => {
+                            const pct = formatQuotaPercent(fam.variants[0]?.quota);
+                            return (
+                                <div key={fam.family} className="flex items-center justify-between px-1.5 py-1 rounded-md hover:bg-muted/30 text-[11px]">
+                                    <span className="text-foreground/90 truncate pr-2">{fam.family}</span>
+                                    <span
+                                        className={cn(
+                                            'font-mono font-semibold shrink-0',
+                                            pct > 50 ? 'text-emerald-400' : pct > 15 ? 'text-amber-400' : 'text-rose-400'
+                                        )}
+                                    >
+                                        {pct}%
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 }
 
 export function TieredModelPicker({
@@ -91,7 +346,6 @@ export function TieredModelPicker({
     const current = models.find((m) => m.modelId === selectedModel) || models[0];
     const currentFamily = findFamilyByModelId(families, current?.modelId);
     const displayName = currentFamily?.family || current?.label || '选择模型';
-    const currentQuotaPct = formatQuotaPercent(current?.quota);
     const currentProvider = currentFamily?.provider || detectProvider((current?.label || '') + ' ' + (current?.modelId || ''));
 
     return (
@@ -110,14 +364,6 @@ export function TieredModelPicker({
                     : <ProviderIcon provider={currentProvider} />
                 }
                 <span className="truncate font-medium">{displayName}</span>
-                {current && typeof current.quota === 'number' && (
-                    <span className={cn(
-                        'text-[10px] font-mono shrink-0',
-                        currentQuotaPct <= 15 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'
-                    )}>
-                        {currentQuotaPct}%
-                    </span>
-                )}
                 <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
             </button>
 

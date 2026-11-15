@@ -23,7 +23,9 @@ const {
     getActiveAccountQuotaSummary,
     classifyAccountTier,
     isInternalOrNoiseModel,
+    buildQuotaPools,
 } = require('../oauth-accounts');
+const { resolveWorkspacePathByName } = require('../ls-fallback');
 
 // Private helper — clear all step cache
 function clearCache() {
@@ -31,13 +33,20 @@ function clearCache() {
     return cleanupAll();
 }
 
-const GEMINI_POOL_FALLBACK_KEYS = [
+const GEMINI_PRO_FALLBACK_KEYS = [
+    'gemini-3.1-pro-high',
+    'gemini-3-pro-high',
+    'gemini-2.5-pro',
     'gemini-3.8-flash-tiered',
     'gemini-3-flash',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
+];
+
+const GEMINI_FLASH_FALLBACK_KEYS = [
+    'gemini-3.8-flash-tiered',
+    'gemini-3-flash',
     'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
 ];
 
 function matchCloudCodeWithMeta(modelSlug, rawModelsMap) {
@@ -45,15 +54,17 @@ function matchCloudCodeWithMeta(modelSlug, rawModelsMap) {
     const lower = String(modelSlug).toLowerCase();
     if (rawModelsMap[lower]) return { entry: rawModelsMap[lower], exact: true };
     const base = lower.replace(/-(low|medium|high|xhigh|max|thinking)$/i, '');
-    const candidates = [base, `${base}-tiered`, `${base}-thinking`, `${base}-medium`];
+    const candidates = [base, `${base}-tiered`, `${base}-thinking`, `${base}-medium`, `${base}-high`];
     for (const key of candidates) {
         if (rawModelsMap[key]) return { entry: rawModelsMap[key], exact: true };
     }
 
     // Newer CLI models (e.g. gemini-4-argon-*, gemini-4-hydrogen-*, gemini-pro-orchestrator-*)
-    // share the same CloudCode quota pool as the primary model in that family.
+    // match their corresponding Pro or Flash quota pool before falling back across Gemini.
     if (lower.startsWith('gemini-')) {
-        for (const key of GEMINI_POOL_FALLBACK_KEYS) {
+        const isPro = /pro|argon|hydrogen|orchestrator/i.test(lower) && !/flash/i.test(lower);
+        const fallbackKeys = isPro ? GEMINI_PRO_FALLBACK_KEYS : GEMINI_FLASH_FALLBACK_KEYS;
+        for (const key of fallbackKeys) {
             if (rawModelsMap[key]?.quotaInfo) return { entry: rawModelsMap[key], exact: false };
         }
         const anyGemini = Object.entries(rawModelsMap).find(([k, v]) =>
@@ -61,6 +72,15 @@ function matchCloudCodeWithMeta(modelSlug, rawModelsMap) {
         );
         if (anyGemini) return { entry: anyGemini[1], exact: false };
     } else if (lower.startsWith('claude-')) {
+        const isOpus = lower.includes('opus');
+        const isSonnet = lower.includes('sonnet');
+        const subFamilyMatch = Object.entries(rawModelsMap).find(([k, v]) =>
+            k.startsWith('claude-')
+            && ((isOpus && k.includes('opus')) || (isSonnet && k.includes('sonnet')))
+            && !v?.isInternal
+            && v?.quotaInfo
+        );
+        if (subFamilyMatch) return { entry: subFamilyMatch[1], exact: false };
         const anyClaude = Object.entries(rawModelsMap).find(([k, v]) =>
             k.startsWith('claude-') && !v?.isInternal && v?.quotaInfo
         );
@@ -152,8 +172,14 @@ function buildCliFallbackModels(agyModels, activeSummary) {
 module.exports = function setupConversationsRoutes(app) {
     // Conversations for a specific workspace (filtered by workspace URI)
     app.get('/api/workspaces/:name/conversations', async (req, res) => {
-        const inst = getInstanceByName(decodeURIComponent(req.params.name));
-        if (!inst) return res.status(400).json({ error: 'Unknown workspace' });
+        const wsName = decodeURIComponent(req.params.name);
+        const inst = getInstanceByName(wsName);
+        if (!inst) {
+            if (resolveWorkspacePathByName(wsName)) {
+                return res.json({ trajectorySummaries: {} });
+            }
+            return res.status(400).json({ error: 'Unknown workspace' });
+        }
 
         try {
             // Source: full Jetbox conversation history (all-time). Fall back to the live
@@ -265,6 +291,10 @@ module.exports = function setupConversationsRoutes(app) {
                     agyModels: models.map((m) => ({ id: m.cliModelId || m.modelId, label: m.label })),
                 });
 
+                const pools = Array.isArray(activeSummary?.pools) && activeSummary.pools.length > 0
+                    ? activeSummary.pools
+                    : buildQuotaPools(models);
+
                 return res.json({
                     models,
                     groups,
@@ -274,9 +304,10 @@ module.exports = function setupConversationsRoutes(app) {
                     activeAccount: {
                         alias: isAdmin ? (activeEntry?.alias || null) : null,
                         email: isAdmin ? (activeEmail || lsEmail || null) : null,
-                        tierId: tierInfo.tierId,
+                        tierId: activeSummary?.tierId || tierInfo.tierId,
                         tierLabel: activeSummary?.tierLabel || tierInfo.tierLabel,
                         modelCount: models.length,
+                        pools,
                     },
                 });
             }
@@ -290,6 +321,9 @@ module.exports = function setupConversationsRoutes(app) {
                 modelsMap: activeSummary?.rawModelsMap || {},
                 agyModels: agyList,
             });
+            const pools = Array.isArray(activeSummary?.pools) && activeSummary.pools.length > 0
+                ? activeSummary.pools
+                : buildQuotaPools(fallback.models);
 
             return res.json({
                 ...fallback,
@@ -298,9 +332,10 @@ module.exports = function setupConversationsRoutes(app) {
                 activeAccount: {
                     alias: isAdmin ? (activeEntry?.alias || null) : null,
                     email: isAdmin ? activeEmail : null,
-                    tierId: tierInfo.tierId,
-                    tierLabel: tierInfo.tierLabel,
+                    tierId: activeSummary?.tierId || tierInfo.tierId,
+                    tierLabel: activeSummary?.tierLabel || tierInfo.tierLabel,
                     modelCount: fallback.models.length,
+                    pools,
                 },
             });
         } catch (e) { res.status(500).json({ error: e.message }); }
@@ -454,10 +489,12 @@ module.exports = function setupConversationsRoutes(app) {
                 olderSteps = cliRes?.steps || [];
             } else {
                 const inst = resolveInst(req);
-                const binBuf = await callApiBinary(cascadeId, loadFrom, loadTo, inst);
-                const binCount = countBinarySteps(binBuf);
-                if (binCount > 0) {
-                    olderSteps = decodeBinarySteps(binBuf);
+                if (inst) {
+                    const binBuf = await callApiBinary(cascadeId, loadFrom, loadTo, inst);
+                    const binCount = countBinarySteps(binBuf);
+                    if (binCount > 0) {
+                        olderSteps = decodeBinarySteps(binBuf);
+                    }
                 }
             }
 
