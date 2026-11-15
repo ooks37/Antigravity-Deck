@@ -41,7 +41,8 @@ module.exports = function setupAgyRoutes(app) {
 
     app.get('/api/agy/models', async (req, res) => {
         try {
-            const result = await agyManager.getAgyModels();
+            const force = req.query.refresh === '1' || req.query.refresh === 'true';
+            const result = await agyManager.getAgyModels({ force });
             const { statusCode = 200, ...payload } = result;
             res.status(statusCode).json(payload);
         } catch (e) {
@@ -51,11 +52,13 @@ module.exports = function setupAgyRoutes(app) {
 
     app.post('/api/agy/run', async (req, res) => {
         try {
-            const { prompt, model, modelLabel, workspace, timeoutMs } = req.body || {};
+            const { prompt, model, modelLabel, effort, conversationId, workspace, timeoutMs } = req.body || {};
             const result = await agyManager.runAgyPrompt({
                 prompt,
                 model,
                 modelLabel,
+                effort,
+                conversationId,
                 workspace,
                 timeoutMs: Number(timeoutMs) || 120000,
             });

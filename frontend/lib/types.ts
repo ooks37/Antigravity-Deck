@@ -110,6 +110,11 @@ export interface Step {
     };
     grepSearch?: unknown;
     find?: unknown;
+    cliTool?: {
+        name?: string;
+        args?: Record<string, unknown>;
+        result?: string;
+    };
     requestedInteraction?: RequestedInteraction;
 }
 

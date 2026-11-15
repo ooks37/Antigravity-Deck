@@ -26,23 +26,69 @@ module.exports = function setupCascadeRoutes(app) {
     });
 
     // Send a message to an existing cascade (non-blocking — fires stream, returns immediately)
+    // Seamlessly falls back to `agy --conversation <id>` when continuing a local CLI SQLite session.
     app.post('/api/cascade/send', async (req, res) => {
         try {
-            const { cascadeId, message, modelId, images, imageBase64 } = req.body;
+            const { cascadeId, message, modelId, modelLabel, effort, images, imageBase64, workspace } = req.body;
             if (!cascadeId || !message) {
                 return res.status(400).json({ error: 'cascadeId and message are required' });
             }
-            // Fire-and-forget: start the stream but don't await completion
-            // Polling will pick up the AI's response steps in real-time
+
+            const { hasCliConversation } = require('../cli-conversations');
+            const { stepCache, ensureCached } = require('../step-cache');
+            const { broadcast, broadcastAll } = require('../ws');
+            const agyManager = require('../agy-manager');
+
+            const inst = resolveInst(req);
+            const isCliBacked = stepCache[cascadeId]?.source === 'cli-db' || hasCliConversation(cascadeId);
+
+            const continueViaCli = async () => {
+                broadcast({ type: 'cascade_status', conversationId: cascadeId, status: 'CASCADE_RUN_STATUS_RUNNING' }, cascadeId);
+                try {
+                    await agyManager.runAgyPrompt({
+                        prompt: message,
+                        model: modelId,
+                        modelLabel,
+                        effort,
+                        conversationId: cascadeId,
+                        workspace,
+                    });
+                    delete stepCache[cascadeId];
+                    await ensureCached(cascadeId, inst);
+                    const updated = stepCache[cascadeId];
+                    broadcast({
+                        type: 'steps_init',
+                        conversationId: cascadeId,
+                        steps: updated ? updated.steps : [],
+                        baseIndex: updated ? (updated.baseIndex || 0) : 0,
+                        stepCount: updated ? (updated.stepCount || 0) : 0,
+                        source: updated?.source || 'cli-db',
+                    }, cascadeId);
+                    broadcastAll({ type: 'conversations_updated' });
+                } finally {
+                    broadcast({ type: 'cascade_status', conversationId: cascadeId, status: 'CASCADE_RUN_STATUS_IDLE' }, cascadeId);
+                }
+            };
+
+            if (isCliBacked || !inst) {
+                continueViaCli().catch((e) => console.error('[Cascade CLI resume error]', e.message));
+                return res.json({ ok: true, cascadeId, mode: 'agy-cli' });
+            }
+
+            // Fire-and-forget: start the LS stream; fall back to CLI if LS doesn't hold this ID (404)
             const opts = { modelId };
             if (images && images.length > 0) {
                 opts.media = images; // array of { mimeType, inlineData, uri, thumbnail }
             } else if (imageBase64) {
                 opts.imageBase64 = imageBase64; // legacy single-image fallback
             }
-            const inst = resolveInst(req);
-            sendMessage(cascadeId, message, { ...opts, inst }).catch(e => console.error('[Cascade send error]', e.message));
-            res.json({ ok: true, cascadeId });
+            sendMessage(cascadeId, message, { ...opts, inst }).catch(async (e) => {
+                console.error('[Cascade send error]', e.message);
+                if (hasCliConversation(cascadeId) || String(e.message).includes('404')) {
+                    try { await continueViaCli(); } catch (cliErr) { console.error('[Cascade CLI fallback error]', cliErr.message); }
+                }
+            });
+            res.json({ ok: true, cascadeId, mode: 'ls' });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 

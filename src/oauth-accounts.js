@@ -16,6 +16,7 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v1/userinfo';
 const CLOUDCODE_MODELS_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels';
+const CLOUDCODE_LOAD_ASSIST_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist';
 const DEFAULT_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 
 const pendingOAuthFlows = new Map(); // state -> { codeVerifier, redirectUri, createdAt }
@@ -714,6 +715,11 @@ async function useOAuthAccount(targetAlias, opts = {}) {
         headlessTokenSynced = true;
     }
 
+    try {
+        require('./agy-manager').invalidateModelsCache();
+    } catch { /* ignore in isolated unit tests */ }
+    quotaCache.delete(found.cleanAlias);
+
     let hubReloaded = false;
     if (opts.reloadHub) {
         try {
@@ -749,6 +755,98 @@ async function useOAuthAccount(targetAlias, opts = {}) {
     };
 }
 
+function isInternalOrNoiseModel(id, info) {
+    if (!id) return true;
+    if (info?.isInternal) return true;
+    if (id.endsWith('-disabled')) return true;
+    if (id.startsWith('tab_') || id.startsWith('chat_')) return true;
+    return false;
+}
+
+function classifyAccountTier({ loadCodeAssist = null, modelsMap = {}, agyModels = [], userStatus = null } = {}) {
+    const currentTier = loadCodeAssist?.currentTier || null;
+    const paidTier = loadCodeAssist?.paidTier || null;
+    const userTier = userStatus?.userTier || null;
+    const planInfo = userStatus?.planStatus?.planInfo || null;
+    const currentTierId = String(currentTier?.id || '').toLowerCase();
+    const paidTierId = String(paidTier?.id || '').toLowerCase();
+
+    const activeTierTexts = [
+        currentTier?.id,
+        currentTier?.name,
+        userTier?.id,
+        userTier?.name,
+        planInfo?.planName,
+        planInfo?.teamsTier,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+    const allTexts = [
+        activeTierTexts,
+        paidTier?.id,
+        paidTier?.name,
+        loadCodeAssist?.upgradeSubscriptionType,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+    const activeKeys = [
+        ...Object.keys(modelsMap || {}).filter((id) => !isInternalOrNoiseModel(id, modelsMap[id])),
+        ...(Array.isArray(agyModels) ? agyModels.map((m) => m.id || '').filter(Boolean) : []),
+    ];
+
+    const hasGemini4 = activeKeys.some((id) => /^gemini-4-/i.test(id) || /orchestrator/i.test(id));
+    const hasClaude55 = activeKeys.some((id) => /claude-.*-5-5/i.test(id));
+    const hasClaude46 = activeKeys.some((id) => /claude-.*-4-6/i.test(id));
+
+    let tierId = 'free';
+    let tierLabel = 'Free 基础 (G3.8/C4.6)';
+
+    if (/ultra/.test(activeTierTexts) || (/ultra/.test(paidTierId) && currentTierId !== 'free-tier')) {
+        tierId = 'ultra';
+        tierLabel = 'AI Ultra';
+    } else if (/jio/.test(activeTierTexts)) {
+        tierId = 'jio';
+        tierLabel = hasGemini4 || hasClaude55 ? 'Jio 合作版 (高配)' : 'Jio 合作版';
+    } else if (/pixel/.test(activeTierTexts)) {
+        tierId = 'pixel';
+        tierLabel = hasGemini4 || hasClaude55 ? 'Pixel 权益版 (高配)' : 'Pixel 权益版';
+    } else if (/student/.test(activeTierTexts)) {
+        tierId = 'student';
+        tierLabel = '学生权益版';
+    } else if (hasGemini4 || hasClaude55) {
+        tierId = 'pro-full';
+        tierLabel = paidTier?.name ? `${paidTier.name} (G4/C5.5)` : 'Pro 高配 (G4/C5.5)';
+    } else if (/jio/.test(allTexts)) {
+        tierId = 'jio';
+        tierLabel = 'Jio 基础版';
+    } else if (/pixel/.test(allTexts)) {
+        tierId = 'pixel';
+        tierLabel = 'Pixel 基础版';
+    } else if (currentTierId && currentTierId !== 'free-tier') {
+        tierId = currentTierId;
+        tierLabel = currentTier?.name || planInfo?.planName || 'Pro';
+    } else if (currentTierId === 'free-tier' && !hasGemini4 && !hasClaude55) {
+        tierId = 'free';
+        tierLabel = hasClaude46 ? 'Free 基础 (G3.8/C4.6)' : 'Free 基础版';
+    }
+
+    return {
+        tierId,
+        tierLabel,
+        currentTierId: currentTier?.id || null,
+        currentTierName: currentTier?.name || null,
+        paidTierId: paidTier?.id || null,
+        paidTierName: paidTier?.name || null,
+        hasGemini4,
+        hasClaude55,
+        hasClaude46,
+    };
+}
+
 async function fetchAccountQuota(alias, opts = {}) {
     const paths = resolvePaths(opts);
     const found = findAccountFile(paths, alias);
@@ -773,19 +871,37 @@ async function fetchAccountQuota(alias, opts = {}) {
         throw new Error(`账号 "${alias}" 缺少可用 access_token`);
     }
 
-    const resp = await httpsJsonRequest(CLOUDCODE_MODELS_URL, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'antigravity/hub/2.24.0 linux/amd64',
-        },
-        body: JSON.stringify({}),
-        timeoutMs: 12000,
-    });
+    const reqHeaders = {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'antigravity/1.15.8 linux/amd64',
+    };
 
-    const modelsMap = resp.data?.models && typeof resp.data.models === 'object' ? resp.data.models : {};
-    const models = Object.entries(modelsMap).map(([id, info]) => {
+    const [modelsResult, lcaResult] = await Promise.allSettled([
+        httpsJsonRequest(CLOUDCODE_MODELS_URL, {
+            method: 'POST',
+            headers: reqHeaders,
+            body: JSON.stringify({}),
+            timeoutMs: 12000,
+        }),
+        httpsJsonRequest(CLOUDCODE_LOAD_ASSIST_URL, {
+            method: 'POST',
+            headers: reqHeaders,
+            body: JSON.stringify({ metadata: { ideType: 'ANTIGRAVITY' } }),
+            timeoutMs: 12000,
+        }),
+    ]);
+
+    const modelsResp = modelsResult.status === 'fulfilled' ? modelsResult.value : null;
+    if (!modelsResp) {
+        throw modelsResult.reason || new Error('获取 CloudCode 模型失败');
+    }
+    const lcaData = lcaResult.status === 'fulfilled' ? lcaResult.value?.data || null : null;
+
+    const rawModelsMap = modelsResp.data?.models && typeof modelsResp.data.models === 'object' ? modelsResp.data.models : {};
+    const filteredEntries = Object.entries(rawModelsMap).filter(([id, info]) => !isInternalOrNoiseModel(id, info));
+
+    const models = filteredEntries.map(([id, info]) => {
         const qi = info?.quotaInfo || {};
         const frac = typeof qi.remainingFraction === 'number' ? qi.remainingFraction : null;
         return {
@@ -793,6 +909,10 @@ async function fetchAccountQuota(alias, opts = {}) {
             displayName: info?.displayName || id,
             remainingFraction: frac,
             resetTime: qi.resetTime || null,
+            recommended: !!info?.recommended,
+            supportsImages: !!info?.supportsImages,
+            supportsThinking: !!info?.supportsThinking,
+            modelPlaceholder: info?.model || null,
         };
     });
 
@@ -805,6 +925,11 @@ async function fetchAccountQuota(alias, opts = {}) {
         : null;
     const exhaustedCount = withQuota.filter((m) => m.remainingFraction <= 0.01).length;
 
+    const tierInfo = classifyAccountTier({
+        loadCodeAssist: lcaData,
+        modelsMap: rawModelsMap,
+    });
+
     const summary = {
         alias: found.cleanAlias,
         email: meta.email,
@@ -813,10 +938,33 @@ async function fetchAccountQuota(alias, opts = {}) {
         minQuota,
         exhaustedCount,
         totalModels: models.length,
-        models: models.slice(0, 24),
+        tierId: tierInfo.tierId,
+        tierLabel: tierInfo.tierLabel,
+        tierInfo,
+        models: models.slice(0, 32),
     };
-    quotaCache.set(found.cleanAlias, summary);
-    return summary;
+    quotaCache.set(found.cleanAlias, { ...summary, rawModelsMap });
+    return opts.includeRaw ? { ...summary, rawModelsMap } : summary;
+}
+
+async function getActiveAccountQuotaSummary({ forceRefresh = false, includeRaw = true } = {}, opts = {}) {
+    const overview = listOAuthAccounts(opts);
+    const activeAcc = (overview.accounts || []).find((a) => a.isActive);
+    if (!activeAcc) return null;
+    const cached = !forceRefresh ? quotaCache.get(activeAcc.alias) : null;
+    if (cached && Date.now() - Date.parse(cached.fetchedAt || 0) < 60000) {
+        if (includeRaw) return cached;
+        const { rawModelsMap: _raw, ...clean } = cached;
+        return clean;
+    }
+    try {
+        return await fetchAccountQuota(activeAcc.alias, { ...opts, includeRaw });
+    } catch {
+        if (!cached) return null;
+        if (includeRaw) return cached;
+        const { rawModelsMap: _raw, ...clean } = cached;
+        return clean;
+    }
 }
 
 async function rotateOAuthAccount(opts = {}) {
@@ -1066,6 +1214,8 @@ module.exports = {
     renameOAuthAccount,
     deleteOAuthAccount,
     fetchAccountQuota,
+    getActiveAccountQuotaSummary,
+    classifyAccountTier,
     rotateOAuthAccount,
     startWebOAuthFlow,
     completeWebOAuthFlow,

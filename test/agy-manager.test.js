@@ -165,6 +165,52 @@ async function runTest(name, fn) {
         assert.ok(capturedArgs.includes('gemini-3.8-flash-low'));
     });
 
+    await runTest('runAgyPrompt forwards --effort, --conversation and invalidateModelsCache refreshes models', async () => {
+        const fakeBin = '/usr/local/bin/agy';
+        let modelsCallCount = 0;
+        let currentList = 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\n';
+        let capturedArgs = null;
+        const ndjson = JSON.stringify({ event: 'result', result: { conversation_id: 'conv-456', status: 'SUCCESS', response: 'ok' } });
+
+        const mgr = createAgyManager({
+            getSettings: () => ({ agyBinaryPath: fakeBin }),
+            existsSync: (p) => p === fakeBin,
+            statSync: () => ({ isFile: () => true }),
+            execFileAsync: async (_bin, args) => {
+                if (args[0] === 'models') {
+                    modelsCallCount++;
+                    return { stdout: currentList, stderr: '' };
+                }
+                capturedArgs = args;
+                return { stdout: ndjson, stderr: '' };
+            },
+        });
+
+        const first = await mgr.getAgyModels();
+        assert.strictEqual(first.models.length, 2);
+        const cachedAgain = await mgr.getAgyModels();
+        assert.strictEqual(cachedAgain.models.length, 2);
+        assert.strictEqual(modelsCallCount, 1);
+
+        currentList += 'gemini-4-argon-medium\tGemini 4 Argon (Medium)\n';
+        mgr.invalidateModelsCache();
+        const refreshed = await mgr.getAgyModels();
+        assert.strictEqual(refreshed.models.length, 3);
+        assert.strictEqual(modelsCallCount, 2);
+
+        const res = await mgr.runAgyPrompt({
+            prompt: 'continue check',
+            model: 'MODEL_PLACEHOLDER_M18',
+            modelLabel: 'Gemini 3.8 Flash (Low)',
+            effort: 'high',
+            conversationId: 'conv-456',
+        });
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.model, 'gemini-3.8-flash-high');
+        assert.ok(capturedArgs.includes('--effort') && capturedArgs[capturedArgs.indexOf('--effort') + 1] === 'high');
+        assert.ok(capturedArgs.includes('--conversation') && capturedArgs[capturedArgs.indexOf('--conversation') + 1] === 'conv-456');
+    });
+
     console.log(`\nResults: ${passed} passed, ${failed} failed\n`);
     process.exit(failed > 0 ? 1 : 0);
 })();

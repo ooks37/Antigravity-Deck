@@ -56,6 +56,8 @@ export interface SelfStats {
 export interface CascadeModel {
     label: string;
     modelId: string;
+    cliModelId?: string;
+    allowedTiers?: string[];
     supportsImages: boolean;
     isRecommended: boolean;
     isBeta?: boolean;
@@ -63,6 +65,14 @@ export interface CascadeModel {
     tagDescription?: string;  // badge tooltip, e.g. "Limited time"
     quota: number; // 0-1 fraction remaining
     resetTime?: string | null;
+}
+
+export interface ActiveModelAccount {
+    alias: string | null;
+    email: string | null;
+    tierId: string;
+    tierLabel: string;
+    modelCount: number;
 }
 
 // A display section mirroring the Antigravity IDE model picker (from clientModelSorts).
@@ -116,12 +126,26 @@ export async function saveMedia(mimeType: string, inlineData: string, thumbnail?
     return res.json();
 }
 
-// Send a message to an existing cascade (supports optional multi-image)
-export async function cascadeSend(cascadeId: string, message: string, modelId?: string, images?: MediaItem[]): Promise<CascadeSendResponse> {
+// Send a message to an existing cascade (supports optional multi-image + effort + workspace)
+export async function cascadeSend(
+    cascadeId: string,
+    message: string,
+    modelId?: string,
+    images?: MediaItem[],
+    opts?: { effort?: string; modelLabel?: string; workspace?: string },
+): Promise<CascadeSendResponse> {
     const res = await fetch(`${API_BASE}/api/cascade/send`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ cascadeId, message, modelId, images }),
+        body: JSON.stringify({
+            cascadeId,
+            message,
+            modelId,
+            images,
+            effort: opts?.effort,
+            modelLabel: opts?.modelLabel,
+            workspace: opts?.workspace,
+        }),
     });
     if (!res.ok) throw new Error(`Send failed: ${res.status}`);
     return res.json();
@@ -200,8 +224,16 @@ export async function updateSettings(settings: Partial<AppSettings>): Promise<Ap
 
 // Get available cascade models. `groups` mirrors the Antigravity IDE picker's
 // sections/order; `models` is the same set flattened (backward compatible).
-export async function getModels(): Promise<{ models: CascadeModel[]; groups: CascadeModelGroup[]; defaultModel: string }> {
-    const res = await fetch(`${API_BASE}/api/models`, { headers: authHeaders() });
+export async function getModels(refresh = false): Promise<{
+    models: CascadeModel[];
+    groups: CascadeModelGroup[];
+    defaultModel: string;
+    source?: string;
+    hubSyncing?: boolean;
+    activeAccount?: ActiveModelAccount;
+}> {
+    const q = refresh ? '?refresh=1' : '';
+    const res = await fetch(`${API_BASE}/api/models${q}`, { headers: authHeaders() });
     if (!res.ok) throw new Error(`Models failed: ${res.status}`);
     return res.json();
 }
@@ -503,6 +535,8 @@ export interface OAuthAccountQuota {
     minQuota?: number | null;
     exhaustedCount?: number;
     totalModels?: number;
+    tierId?: string;
+    tierLabel?: string;
     models?: Array<{
         modelId: string;
         displayName: string;
@@ -623,6 +657,8 @@ export async function runAgyQuick(payload: {
     prompt: string;
     model?: string;
     modelLabel?: string;
+    effort?: string;
+    conversationId?: string;
     workspace?: string;
 }): Promise<{ success: boolean; text?: string; sessionId?: string | null; error?: string }> {
     return apiJson(`${API_BASE}/api/agy/run`, {

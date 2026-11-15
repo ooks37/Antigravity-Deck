@@ -44,7 +44,16 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
                         steps: cache ? cache.steps : [],
                         baseIndex: cache ? (cache.baseIndex || 0) : 0,
                         stepCount: cache ? (cache.stepCount || 0) : 0,
+                        source: cache?.source || (cache ? 'ls' : 'none'),
+                        notFound: !cache,
                     });
+                    if (cache?.source === 'cli-db') {
+                        sendToOne(ws, {
+                            type: 'cascade_status',
+                            conversationId: msg.conversationId,
+                            status: 'CASCADE_RUN_STATUS_IDLE',
+                        });
+                    }
                 } else if (msg.type === 'subscribe_all') {
                     // Live Logs mode: receive all broadcasts regardless of conversation
                     globalViewers.add(ws);

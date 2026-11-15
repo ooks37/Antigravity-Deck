@@ -4,6 +4,7 @@
 const { lsConfig, lsInstances, BATCH_SIZE, STEP_WINDOW_SIZE } = require('./config');
 const { callApi } = require('./api');
 const { countBinarySteps, decodeBinarySteps } = require('./protobuf');
+const { readCliConversationSteps, hasCliConversation } = require('./cli-conversations');
 
 const stepCache = {};       // { convId: { steps: [], stepCount: N, baseIndex: M } }
 const fetchingSet = new Set(); // per-conversation fetching lock
@@ -139,7 +140,20 @@ async function ensureCached(convId, inst = null) {
     // otherwise the shared hub (lsConfig). lsInstances can be empty (0 tracked workspaces)
     // while the hub is fully usable, so gate on the effective connection, not instance count.
     const conn = inst || lsConfig;
+    const tryCliFallback = () => {
+        if (!hasCliConversation(convId)) return false;
+        const cliRes = readCliConversationSteps(convId, { startIndex: 0, endIndex: 999999 });
+        if (!cliRes) return false;
+        const total = cliRes.totalSteps || cliRes.steps.length;
+        const baseIndex = Math.max(0, total - STEP_WINDOW_SIZE);
+        const windowedSteps = baseIndex > 0 ? cliRes.steps.slice(baseIndex) : cliRes.steps;
+        stepCache[convId] = { steps: windowedSteps, stepCount: total, baseIndex, source: 'cli-db' };
+        console.log(`[✓] Loaded CLI DB ${convId.substring(0, 8)} (${windowedSteps.length}/${total} steps, base=${baseIndex})`);
+        return true;
+    };
+
     if (!conn.port || !conn.csrfToken) {
+        if (tryCliFallback()) return;
         console.log(`[!] ensureCached skipped — LS not configured yet`);
         return; // Don't cache empty — will retry after init
     }
@@ -163,9 +177,15 @@ async function ensureCached(convId, inst = null) {
         // Only fetch the tail window (last STEP_WINDOW_SIZE steps)
         const baseIndex = Math.max(0, stepCount - STEP_WINDOW_SIZE);
         const { steps, hasGaps } = await fetchAllSteps(convId, stepCount, inst, baseIndex);
-        stepCache[convId] = { steps, stepCount, baseIndex };
+        if (steps.length === 0 && hasCliConversation(convId) && tryCliFallback()) {
+            return;
+        }
+        stepCache[convId] = { steps, stepCount, baseIndex, source: 'ls' };
         console.log(`[✓] Cached ${steps.length}/${stepCount} steps (window from ${baseIndex})${hasGaps ? ' (with gaps)' : ''}`);
     } catch (e) {
+        if (tryCliFallback()) {
+            return;
+        }
         console.log(`[!] Load error: ${e.message}`);
         // Don't cache empty on error — will retry on next set_conversation
     } finally {

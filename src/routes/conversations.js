@@ -1,6 +1,7 @@
 // === Conversations Routes ===
 // /api/workspaces/:name/conversations, /api/models, /api/conversations/*, /api/user, /api/cache
 
+const fs = require('fs');
 const { callApi, callApiOnInstance } = require('../api');
 const { callApiBinary } = require('../api');
 const { countBinarySteps, decodeBinarySteps } = require('../protobuf');
@@ -9,11 +10,81 @@ const { lsInstances } = require('../config');
 const { stepCache } = require('../cache');
 const { getInstanceByName } = require('../detector');
 const { resolveInst } = require('./route-helpers');
+const {
+    hasCliConversation,
+    readCliConversationSteps,
+    listCliConversationIds,
+    getCliDbPath,
+} = require('../cli-conversations');
+const agyManager = require('../agy-manager');
+const {
+    listOAuthAccounts,
+    getActiveAccountQuotaSummary,
+    classifyAccountTier,
+} = require('../oauth-accounts');
 
 // Private helper — clear all step cache
 function clearCache() {
     const { cleanupAll } = require('../cleanup');
     return cleanupAll();
+}
+
+function matchCloudCodeQuota(modelSlug, rawModelsMap) {
+    if (!rawModelsMap || typeof rawModelsMap !== 'object' || !modelSlug) return null;
+    const lower = String(modelSlug).toLowerCase();
+    if (rawModelsMap[lower]?.quotaInfo) return rawModelsMap[lower].quotaInfo;
+    if (lower.startsWith('gemini-3.8-flash') && rawModelsMap['gemini-3.8-flash-tiered']?.quotaInfo) {
+        return rawModelsMap['gemini-3.8-flash-tiered'].quotaInfo;
+    }
+    if (lower.startsWith('gemini-4-argon') && rawModelsMap['gemini-4-argon']?.quotaInfo) {
+        return rawModelsMap['gemini-4-argon'].quotaInfo;
+    }
+    if (lower.startsWith('gemini-4-hydrogen') && rawModelsMap['gemini-4-hydrogen']?.quotaInfo) {
+        return rawModelsMap['gemini-4-hydrogen'].quotaInfo;
+    }
+    return null;
+}
+
+function buildCliFallbackModels(agyModels, activeSummary) {
+    const rawMap = activeSummary?.rawModelsMap || {};
+    const sourceModels = Array.isArray(agyModels) && agyModels.length > 0
+        ? agyModels.map((m) => {
+            const qi = matchCloudCodeQuota(m.id, rawMap);
+            return {
+                label: m.label,
+                modelId: m.id,
+                cliModelId: m.id,
+                supportsImages: true,
+                isRecommended: /gemini-4-argon-medium|gemini-3\.8-flash-medium|claude-sonnet/i.test(m.id),
+                isBeta: false,
+                tagTitle: '',
+                tagDescription: '',
+                quota: typeof qi?.remainingFraction === 'number' ? qi.remainingFraction : 1,
+                resetTime: qi?.resetTime || null,
+            };
+        })
+        : (activeSummary?.models || [])
+            .filter((m) => !/^gemini-(2\.5|3-flash|3\.1)/i.test(m.modelId) && !/-image$/i.test(m.modelId))
+            .map((m) => ({
+                label: m.displayName || m.modelId,
+                modelId: m.modelId,
+                cliModelId: m.modelId,
+                supportsImages: !!m.supportsImages,
+                isRecommended: !!m.recommended,
+                isBeta: false,
+                tagTitle: '',
+                tagDescription: '',
+                quota: typeof m.remainingFraction === 'number' ? m.remainingFraction : 1,
+                resetTime: m.resetTime || null,
+            }));
+
+    const groups = sourceModels.length ? [{ name: 'Models', models: sourceModels }] : [];
+    const recommended = sourceModels.find((m) => m.isRecommended) || sourceModels[0];
+    return {
+        models: sourceModels,
+        groups,
+        defaultModel: recommended?.modelId || '',
+    };
 }
 
 module.exports = function setupConversationsRoutes(app) {
@@ -51,83 +122,170 @@ module.exports = function setupConversationsRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // Available models for cascade — mirrors the Antigravity IDE's model picker:
-    // same models, same order + grouping (from clientModelSorts), same badges (tagTitle).
-    // The LS already scopes clientModelConfigs to the signed-in user's tier, so no extra
-    // tier filtering is needed here; we only drop any explicitly-disabled model defensively.
+    // Available models for cascade — merges active OAuth account entitlement & agy CLI fallback
+    // so /api/models never crashes with 500 during hub LS reboot after account switch and
+    // accurately reflects Free/Jio/Pixel/Pro/Ultra account differences.
     app.get('/api/models', async (req, res) => {
         try {
-            // Models are hub-global in 2.0.11; resolveInst() already falls back to the
-            // shared hub (getFirstActiveInstance) when no workspace is tracked, so the
-            // picker still loads before a folder is opened.
+            const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+            const oauthOverview = listOAuthAccounts();
+            const activeEntry = (oauthOverview.accounts || []).find((a) => a.isActive) || null;
+            const activeSummary = await getActiveAccountQuotaSummary({ forceRefresh, includeRaw: true }).catch(() => null);
+            const activeEmail = activeSummary?.email || oauthOverview.activeEmail || activeEntry?.email || null;
+
             const inst = resolveInst(req);
-            if (!inst) return res.status(503).json({ error: 'IDE not connected' });
-            const data = await callApi('GetCascadeModelConfigData', {}, inst);
+            let lsData = null;
+            let lsUserStatus = null;
+            let lsFailed = !inst;
 
-            const mapModel = (m) => ({
-                label: m.label,
-                modelId: m.modelOrAlias?.model || m.modelOrAlias?.alias || '',
-                supportsImages: !!m.supportsImages,
-                isRecommended: !!m.isRecommended,
-                isBeta: !!m.isBeta,
-                tagTitle: m.tagTitle || '',
-                tagDescription: m.tagDescription || '',
-                quota: m.quotaInfo?.remainingFraction ?? 1,
-                resetTime: m.quotaInfo?.resetTime || null,
-            });
-
-            // LS omits `disabled` when false; drop only models explicitly disabled.
-            const configs = (data.clientModelConfigs || []).filter(m => m.disabled !== true);
-            const byLabel = new Map(configs.map(m => [m.label, m]));
-
-            // Build IDE-faithful groups from the default sort scheme (clientModelSorts[0]).
-            // Its groups reference models by label and define the display order + grouping.
-            const used = new Set();
-            const groups = [];
-            const primarySort = (data.clientModelSorts || [])[0];
-            if (primarySort) {
-                for (const g of (primarySort.groups || [])) {
-                    const groupModels = (g.modelLabels || [])
-                        .map(label => byLabel.get(label))
-                        .filter(Boolean)
-                        .map(m => { used.add(m.label); return mapModel(m); });
-                    // Only the first group carries the sort name as its header (avoids dupes).
-                    if (groupModels.length) groups.push({ name: groups.length === 0 ? (primarySort.name || '') : '', models: groupModels });
+            if (inst) {
+                const [cfgRes, userRes] = await Promise.allSettled([
+                    callApi('GetCascadeModelConfigData', {}, inst),
+                    callApi('GetUserStatus', {}, inst),
+                ]);
+                if (cfgRes.status === 'fulfilled' && cfgRes.value?.clientModelConfigs) {
+                    lsData = cfgRes.value;
+                } else {
+                    lsFailed = true;
+                }
+                if (userRes.status === 'fulfilled' && userRes.value?.userStatus) {
+                    lsUserStatus = userRes.value.userStatus;
                 }
             }
-            // Any models the sort didn't reference stay visible (never silently hide them).
-            const leftovers = configs.filter(m => !used.has(m.label)).map(mapModel);
-            if (leftovers.length) groups.push({ name: groups.length ? 'Other' : '', models: leftovers });
 
-            // Flat list (backward compatible) = groups flattened, already in IDE order.
-            const models = groups.flatMap(g => g.models);
-            const defaultModel = data.defaultOverrideModelConfig?.modelOrAlias?.model || '';
-            res.json({ models, groups, defaultModel });
+            const lsEmail = lsUserStatus?.email || null;
+            const lsEmailMatches = !activeEmail || !lsEmail || lsEmail.toLowerCase() === activeEmail.toLowerCase();
+
+            if (lsData && lsEmailMatches) {
+                const rawMap = activeSummary?.rawModelsMap || {};
+                const mapModel = (m) => {
+                    const qi = matchCloudCodeQuota(m.modelId, rawMap);
+                    return {
+                        label: m.label,
+                        modelId: m.modelOrAlias?.model || m.modelOrAlias?.alias || '',
+                        cliModelId: m.modelId || '',
+                        allowedTiers: Array.isArray(m.allowedTiers) ? m.allowedTiers : [],
+                        supportsImages: !!m.supportsImages,
+                        isRecommended: !!m.isRecommended,
+                        isBeta: !!m.isBeta,
+                        tagTitle: m.tagTitle || '',
+                        tagDescription: m.tagDescription || '',
+                        quota: m.quotaInfo?.remainingFraction ?? qi?.remainingFraction ?? 1,
+                        resetTime: m.quotaInfo?.resetTime || qi?.resetTime || null,
+                    };
+                };
+
+                const configs = (lsData.clientModelConfigs || []).filter((m) => m.disabled !== true);
+                const byLabel = new Map(configs.map((m) => [m.label, m]));
+
+                const used = new Set();
+                const groups = [];
+                const primarySort = (lsData.clientModelSorts || [])[0];
+                if (primarySort) {
+                    for (const g of (primarySort.groups || [])) {
+                        const groupModels = (g.modelLabels || [])
+                            .map((label) => byLabel.get(label))
+                            .filter(Boolean)
+                            .map((m) => { used.add(m.label); return mapModel(m); });
+                        if (groupModels.length) groups.push({ name: groups.length === 0 ? (primarySort.name || '') : '', models: groupModels });
+                    }
+                }
+                const leftovers = configs.filter((m) => !used.has(m.label)).map(mapModel);
+                if (leftovers.length) groups.push({ name: groups.length ? 'Other' : '', models: leftovers });
+
+                const models = groups.flatMap((g) => g.models);
+                const defaultModel = lsData.defaultOverrideModelConfig?.modelOrAlias?.model || models[0]?.modelId || '';
+                const tierInfo = classifyAccountTier({
+                    userStatus: lsUserStatus,
+                    modelsMap: rawMap,
+                    agyModels: models.map((m) => ({ id: m.cliModelId || m.modelId, label: m.label })),
+                });
+
+                return res.json({
+                    models,
+                    groups,
+                    defaultModel,
+                    source: 'ls',
+                    hubSyncing: false,
+                    activeAccount: {
+                        alias: activeEntry?.alias || null,
+                        email: activeEmail || lsEmail || null,
+                        tierId: tierInfo.tierId,
+                        tierLabel: activeSummary?.tierLabel || tierInfo.tierLabel,
+                        modelCount: models.length,
+                    },
+                });
+            }
+
+            // Hub LS offline, restarting after OAuth swap, or temporarily pointing at old session:
+            // immediately serve active account's real agy CLI / CloudCode models with zero 500 error.
+            const agyRes = await agyManager.getAgyModels({ force: true }).catch(() => ({ models: [] }));
+            const agyList = Array.isArray(agyRes?.models) ? agyRes.models : [];
+            const fallback = buildCliFallbackModels(agyList, activeSummary);
+            const tierInfo = classifyAccountTier({
+                modelsMap: activeSummary?.rawModelsMap || {},
+                agyModels: agyList,
+            });
+
+            return res.json({
+                ...fallback,
+                source: agyList.length ? 'agy-cli' : 'cloudcode',
+                hubSyncing: Boolean(lsFailed || !lsEmailMatches),
+                activeAccount: {
+                    alias: activeEntry?.alias || null,
+                    email: activeEmail,
+                    tierId: tierInfo.tierId,
+                    tierLabel: tierInfo.tierLabel,
+                    modelCount: fallback.models.length,
+                },
+            });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // Full conversation history — from the Jetbox stream (all projects, all-time).
+    // Full conversation history — Jetbox stream + any local antigravity-cli SQLite sessions.
     app.get('/api/conversations', async (req, res) => {
         try {
             const { getSummaries } = require('../jetbox');
-            const summaries = getSummaries();
-            if (summaries && Object.keys(summaries).length > 0) {
-                return res.json({ trajectorySummaries: summaries });
+            const jetboxSummaries = getSummaries();
+            let summaries = jetboxSummaries && Object.keys(jetboxSummaries).length > 0
+                ? { ...jetboxSummaries }
+                : {};
+
+            if (Object.keys(summaries).length === 0) {
+                const seenConns = new Set();
+                for (const inst of lsInstances) {
+                    const connKey = `${inst.useTls ? 's' : ''}${inst.port}:${inst.csrfToken}`;
+                    if (seenConns.has(connKey)) continue;
+                    seenConns.add(connKey);
+                    try {
+                        const data = await callApiOnInstance(inst, 'GetAllCascadeTrajectories');
+                        if (data?.trajectorySummaries) Object.assign(summaries, data.trajectorySummaries);
+                    } catch { }
+                }
             }
-            // Fallback (Jetbox not populated yet): merge live cascade lists per unique hub conn.
-            const { lsInstances } = require('../config');
-            const merged = { trajectorySummaries: {} };
-            const seenConns = new Set();
-            for (const inst of lsInstances) {
-                const connKey = `${inst.useTls ? 's' : ''}${inst.port}:${inst.csrfToken}`;
-                if (seenConns.has(connKey)) continue;
-                seenConns.add(connKey);
-                try {
-                    const data = await callApiOnInstance(inst, 'GetAllCascadeTrajectories');
-                    if (data?.trajectorySummaries) Object.assign(merged.trajectorySummaries, data.trajectorySummaries);
-                } catch { }
+
+            // Merge local CLI SQLite conversations so new agy sessions always appear even before Jetbox sync
+            for (const cliId of listCliConversationIds()) {
+                if (!summaries[cliId]) {
+                    try {
+                        const dbPath = getCliDbPath(cliId);
+                        const stat = dbPath ? fs.statSync(dbPath) : null;
+                        const first = readCliConversationSteps(cliId, { startIndex: 0, endIndex: 1 });
+                        const firstText = first?.steps?.[0]?.userInput?.userResponse
+                            || first?.steps?.[0]?.userInput?.items?.[0]?.text
+                            || 'CLI 对话';
+                        summaries[cliId] = {
+                            summary: String(firstText).trim().slice(0, 80) || 'CLI 对话',
+                            stepCount: first?.totalSteps || 0,
+                            lastModifiedTime: stat ? stat.mtime.toISOString() : new Date().toISOString(),
+                            createdTime: stat ? stat.birthtime.toISOString() : new Date().toISOString(),
+                            source: 'cli-db',
+                        };
+                    } catch { /* ignore unreadable db */ }
+                }
             }
-            res.json(merged);
+
+            res.json({ trajectorySummaries: summaries });
         }
         catch (e) { res.status(500).json({ error: e.message }); }
     });
@@ -141,22 +299,41 @@ module.exports = function setupConversationsRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // Conversation steps
+    // Conversation steps — tries Hub LS first, falls back to local antigravity-cli SQLite DB
     app.get('/api/conversations/:id/steps', async (req, res) => {
+        const cascadeId = req.params.id;
+        const startIndex = parseInt(req.query.start) || 0;
+        const endIndex = parseInt(req.query.end) || 999999;
         try {
             const inst = resolveInst(req);
-            res.json(await callApi('GetCascadeTrajectorySteps', {
-                cascadeId: req.params.id,
-                startIndex: parseInt(req.query.start) || 0,
-                endIndex: parseInt(req.query.end) || 999999
-            }, inst));
+            if (inst) {
+                try {
+                    const lsResult = await callApi('GetCascadeTrajectorySteps', {
+                        cascadeId,
+                        startIndex,
+                        endIndex,
+                    }, inst);
+                    const lsSteps = Array.isArray(lsResult?.steps) ? lsResult.steps : [];
+                    if (lsSteps.length > 0 || !hasCliConversation(cascadeId)) {
+                        return res.json({ ...lsResult, source: 'ls' });
+                    }
+                } catch {
+                    // Fall through to CLI DB / not-found handling
+                }
+            }
+
+            const cliResult = readCliConversationSteps(cascadeId, { startIndex, endIndex });
+            if (cliResult) {
+                return res.json(cliResult);
+            }
+
+            return res.json({ steps: [], totalSteps: 0, baseIndex: startIndex, notFound: true, source: 'none' });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // Load older steps for scroll-up pagination (binary protobuf for reliability)
+    // Load older steps for scroll-up pagination (binary protobuf for LS, SQLite slice for CLI DB)
     app.get('/api/conversations/:id/steps/older', async (req, res) => {
         try {
-            const { STEP_LOAD_CHUNK } = require('../config');
             const cascadeId = req.params.id;
             const cache = stepCache[cascadeId];
             if (!cache || (cache.baseIndex || 0) === 0) {
@@ -167,16 +344,19 @@ module.exports = function setupConversationsRoutes(app) {
             const loadFrom = Math.max(0, currentBase - STEP_LOAD_CHUNK);
             const loadTo = currentBase;
 
-            // Use binary protobuf for reliable pagination
-            const inst = resolveInst(req);
-            const binBuf = await callApiBinary(cascadeId, loadFrom, loadTo, inst);
-            const binCount = countBinarySteps(binBuf);
             let olderSteps = [];
-            if (binCount > 0) {
-                olderSteps = decodeBinarySteps(binBuf);
+            if (cache.source === 'cli-db' || hasCliConversation(cascadeId)) {
+                const cliRes = readCliConversationSteps(cascadeId, { startIndex: loadFrom, endIndex: loadTo });
+                olderSteps = cliRes?.steps || [];
+            } else {
+                const inst = resolveInst(req);
+                const binBuf = await callApiBinary(cascadeId, loadFrom, loadTo, inst);
+                const binCount = countBinarySteps(binBuf);
+                if (binCount > 0) {
+                    olderSteps = decodeBinarySteps(binBuf);
+                }
             }
 
-            // Prepend to cache (allow temporary expansion, next poll trim will restore)
             if (olderSteps.length > 0) {
                 cache.steps.unshift(...olderSteps);
                 cache.baseIndex = loadFrom;

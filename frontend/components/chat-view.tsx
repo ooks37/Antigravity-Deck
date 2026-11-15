@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Step } from '@/lib/types';
 import { extractStepContent, getStepConfig } from '@/lib/step-utils';
 import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows, getSettings, updatePermissionsConfig, getPermissionsConfig, uploadWorkspaceFile, rotateOAuthAccount, runAgyQuick } from '@/lib/cascade-api';
-import type { Workspace, CascadeModel, CascadeModelGroup, MediaItem, WorkflowItem, FleetServer, UploadedFileResult } from '@/lib/cascade-api';
+import type { Workspace, CascadeModel, CascadeModelGroup, ActiveModelAccount, MediaItem, WorkflowItem, FleetServer, UploadedFileResult } from '@/lib/cascade-api';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,8 @@ interface ChatViewProps {
     prefillPrompt?: { text: string; seq: number } | null;
     activeAccountLabel?: string | null;
     onOpenAccounts?: () => void;
+    stepsLoading?: boolean;
+    convNotFound?: boolean;
 }
 
 // === Classification ===
@@ -64,7 +66,14 @@ import { ProcessingGroup } from './chat/processing-group';
 import { GeneratedImageStep } from './chat/generated-image-step';
 import { StreamingIndicator } from './chat/streaming-indicator';
 import { DoubaoWelcome } from './chat/doubao-welcome';
-import { TieredModelPicker } from './chat/tiered-model-picker';
+import { TieredModelPicker, EffortPicker } from './chat/tiered-model-picker';
+import {
+    type EffortLevel,
+    groupModelsByFamily,
+    findFamilyByModelId,
+    pickVariantForEffort,
+    normalizeEffortKey,
+} from '@/lib/model-tiers';
 import { WorkflowAutocomplete } from './workflow-autocomplete';
 import type { WorkflowAutocompleteHandle } from './workflow-autocomplete';
 
@@ -114,6 +123,8 @@ export function ChatView({
     prefillPrompt,
     activeAccountLabel,
     onOpenAccounts,
+    stepsLoading = false,
+    convNotFound = false,
 }: ChatViewProps) {
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
@@ -134,7 +145,72 @@ export function ChatView({
     const [selectedWs, setSelectedWs] = useState<number | null>(null);
     const [models, setModels] = useState<CascadeModel[]>([]);
     const [, setModelGroups] = useState<CascadeModelGroup[]>([]);
+    const [activeAccount, setActiveAccount] = useState<ActiveModelAccount | null>(null);
+    const [hubSyncing, setHubSyncing] = useState(false);
     const [selectedModel, setSelectedModel] = useState<string>('');
+    const [selectedEffort, setSelectedEffort] = useState<EffortLevel>(() => {
+        if (typeof window !== 'undefined') {
+            const norm = normalizeEffortKey(localStorage.getItem('antigravity-effort'));
+            if (norm !== 'standard') return norm;
+        }
+        return 'medium';
+    });
+    const selectedEffortRef = useRef<EffortLevel>(selectedEffort);
+    selectedEffortRef.current = selectedEffort;
+    const hubSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const handleSelectEffort = (effort: EffortLevel) => {
+        setSelectedEffort(effort);
+        if (typeof window !== 'undefined') {
+            try { localStorage.setItem('antigravity-effort', effort); } catch { /* ignore */ }
+        }
+    };
+
+    const applyModelsResponse = (
+        m: {
+            models?: CascadeModel[];
+            groups?: CascadeModelGroup[];
+            defaultModel?: string;
+            hubSyncing?: boolean;
+            activeAccount?: ActiveModelAccount;
+        },
+        preferredDefault?: string,
+        canRetrySync = true,
+    ) => {
+        const list = m.models || [];
+        setModels(list);
+        setModelGroups(m.groups || []);
+        if (m.activeAccount !== undefined) setActiveAccount(m.activeAccount || null);
+        setHubSyncing(Boolean(m.hubSyncing));
+
+        setSelectedModel((prev) => {
+            if (list.length === 0) return '';
+            const direct = prev ? list.find((item) => item.modelId === prev || item.cliModelId === prev) : undefined;
+            if (direct) return direct.modelId;
+
+            const candidateDefault =
+                (preferredDefault && list.find((item) => item.modelId === preferredDefault || item.cliModelId === preferredDefault)?.modelId) ||
+                (m.defaultModel && list.find((item) => item.modelId === m.defaultModel || item.cliModelId === m.defaultModel)?.modelId) ||
+                list[0].modelId;
+
+            const fam = findFamilyByModelId(groupModelsByFamily(list), candidateDefault);
+            const variant = fam ? pickVariantForEffort(fam, selectedEffortRef.current) : null;
+            return variant?.modelId || candidateDefault;
+        });
+
+        if (hubSyncTimerRef.current) {
+            clearTimeout(hubSyncTimerRef.current);
+            hubSyncTimerRef.current = null;
+        }
+        if (m.hubSyncing && canRetrySync) {
+            hubSyncTimerRef.current = setTimeout(() => {
+                hubSyncTimerRef.current = null;
+                getModels(true)
+                    .then((fresh) => applyModelsResponse(fresh, undefined, false))
+                    .catch(() => { });
+            }, 5500);
+        }
+    };
     const [, setShowWsPicker] = useState(false);
     const [, setShowModelPicker] = useState(false);
     const [showTokens, setShowTokens] = useState(() => {
@@ -288,12 +364,7 @@ export function ChatView({
                 else if (ws.length > 0) setSelectedWs(0);
                 if (modelsResp && !modelInitRef.current) {
                     modelInitRef.current = true;
-                    setModels(modelsResp.models);
-                    setModelGroups(modelsResp.groups || []);
-                    // Use settings default → API default → first model
-                    const defaultFromSettings = settingsResp?.defaultModel;
-                    const defaultFromApi = modelsResp.defaultModel;
-                    if (!selectedModel) setSelectedModel(defaultFromSettings || defaultFromApi || modelsResp.models?.[0]?.modelId || '');
+                    applyModelsResponse(modelsResp, settingsResp?.defaultModel, true);
                 }
             })
             .catch(() => { });
@@ -309,16 +380,21 @@ export function ChatView({
         fetchWorkflows(currentWorkspace || undefined).then(setWorkflows).catch(() => { });
     }, [wsVersion, currentWorkspace]);
 
-    // Refresh model quotas automatically when OAuth account swaps
+    // Refresh models & tier info automatically when OAuth account swaps or LS reconnects
     useEffect(() => {
         const reloadModels = () => {
-            getModels().then((m) => {
-                setModels(m.models || []);
-                setModelGroups(m.groups || []);
-            }).catch(() => { });
+            getModels(true).then((m) => applyModelsResponse(m, undefined, true)).catch(() => { });
         };
         window.addEventListener('oauth-account-swapped', reloadModels);
-        return () => window.removeEventListener('oauth-account-swapped', reloadModels);
+        window.addEventListener('ls-detected', reloadModels);
+        return () => {
+            window.removeEventListener('oauth-account-swapped', reloadModels);
+            window.removeEventListener('ls-detected', reloadModels);
+            if (hubSyncTimerRef.current) {
+                clearTimeout(hubSyncTimerRef.current);
+                hubSyncTimerRef.current = null;
+            }
+        };
     }, []);
 
     // Apply prefilled prompt from sidebar fleet or quick actions
@@ -406,11 +482,16 @@ export function ChatView({
             setPendingImages([]);
             setCliTurns((prev) => [...prev, { id: turnId, prompt: text, reply: null, pending: true }]);
             try {
+                const normEffort = normalizeEffortKey(selectedEffort);
+                const apiEffort = (normEffort === 'low' || normEffort === 'medium' || normEffort === 'high' || normEffort === 'xhigh' || normEffort === 'max') ? normEffort : undefined;
                 const selectedLabel = models.find((m) => m.modelId === selectedModel)?.label;
                 const res = await runAgyQuick({
                     prompt: text,
                     model: selectedModel || undefined,
                     modelLabel: selectedLabel,
+                    effort: apiEffort,
+                    conversationId: activeCascadeId || undefined,
+                    workspace: currentWorkspace || undefined,
                 });
                 setCliTurns((prev) => prev.map((t) => (t.id === turnId
                     ? { ...t, pending: false, reply: res.text || '', error: res.success ? null : (res.error || 'agy 执行失败') }
@@ -452,7 +533,14 @@ export function ChatView({
             }
 
             if (activeCascadeId) {
-                await cascadeSend(activeCascadeId, text, selectedModel || undefined, mediaItems);
+                const normEffort = normalizeEffortKey(selectedEffort);
+                const apiEffort = (normEffort === 'low' || normEffort === 'medium' || normEffort === 'high' || normEffort === 'xhigh' || normEffort === 'max') ? normEffort : undefined;
+                const selectedLabel = models.find((m) => m.modelId === selectedModel)?.label;
+                await cascadeSend(activeCascadeId, text, selectedModel || undefined, mediaItems, {
+                    effort: apiEffort,
+                    modelLabel: selectedLabel,
+                    workspace: currentWorkspace || undefined,
+                });
             } else {
                 const result = await cascadeSubmit(text, selectedModel || undefined, mediaItems, currentWorkspace || undefined, newChatWorkspaceUri || undefined);
                 const newId = result.cascadeId;
@@ -746,10 +834,21 @@ export function ChatView({
                         {displaySteps.length === 0 && cliTurns.length === 0 ? (
                             currentConvId ? (
                                 <div className="flex items-center justify-center h-full">
-                                    <div className="text-center space-y-2 text-muted-foreground">
-                                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary/70" />
-                                        <p className="text-sm">正在加载对话记录...</p>
-                                    </div>
+                                    {stepsLoading ? (
+                                        <div className="text-center space-y-2 text-muted-foreground">
+                                            <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary/70" />
+                                            <p className="text-sm">正在加载对话记录...</p>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center space-y-1.5 text-muted-foreground">
+                                            <p className="text-sm font-medium text-foreground/80">
+                                                {convNotFound ? '未找到本地对话步骤记录' : '该对话暂无本地步骤记录'}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground/80">
+                                                发送一条消息可继续对话
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <DoubaoWelcome
@@ -858,11 +957,22 @@ export function ChatView({
                         <div className="max-w-3xl mx-auto rounded-2xl border border-border/80 bg-card shadow-[0_6px_24px_rgba(0,0,0,0.06)] px-3 pt-2.5 pb-2 space-y-2">
                             {/* Pickers row */}
                             <div className="flex items-center gap-1.5 text-xs flex-wrap">
-                                {/* Doubao Tiered Model Picker */}
+                                {/* Doubao Tiered Model Picker & Decoupled Effort Picker */}
                                 <TieredModelPicker
                                     models={models}
                                     selectedModel={selectedModel}
+                                    selectedEffort={selectedEffort}
                                     onSelectModel={setSelectedModel}
+                                    onSelectEffort={handleSelectEffort}
+                                    activeAccount={activeAccount}
+                                    hubSyncing={hubSyncing}
+                                />
+                                <EffortPicker
+                                    models={models}
+                                    selectedModel={selectedModel}
+                                    selectedEffort={selectedEffort}
+                                    onSelectModel={setSelectedModel}
+                                    onSelectEffort={handleSelectEffort}
                                 />
 
                                 {/* 3-mode Execution Guard Pill */}

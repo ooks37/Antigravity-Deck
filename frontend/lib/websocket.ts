@@ -16,6 +16,9 @@ interface WSState {
     steps: Step[];
     baseIndex: number;        // server index of steps[0]
     stepCount: number;        // total steps known to server
+    stepsLoading: boolean;    // true while waiting for initial steps of currentConvId
+    convSource?: string;      // 'ls' | 'cli-db' | 'none'
+    convNotFound?: boolean;   // true when backend confirmed neither LS nor local CLI DB has steps
     loadingOlder: boolean;    // true while fetching older steps
     conversations: Record<string, TrajectorySummary>;
     currentConvId: string | null;
@@ -75,6 +78,9 @@ export function useWebSocket() {
         steps: (hasCachedData ? cachedSteps!.steps : []) as Step[],
         baseIndex: hasCachedData ? cachedSteps!.baseIndex : 0,
         stepCount: hasCachedData ? cachedSteps!.stepCount : 0,
+        stepsLoading: Boolean(storedConvId && !hasCachedData),
+        convSource: undefined,
+        convNotFound: false,
         loadingOlder: false,
         conversations: {} as Record<string, TrajectorySummary>,
         currentConvId: storedConvId,
@@ -166,7 +172,12 @@ export function useWebSocket() {
                 detected: !!data.detected,
                 swapping: !!data.swapping,
             }));
-            if (data.detected) loadConversationsRef.current();
+            if (data.detected) {
+                loadConversationsRef.current();
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('ls-detected', { detail: data }));
+                }
+            }
         });
 
         const offSwapComplete = wsService.on('swap_complete', (data) => {
@@ -190,6 +201,8 @@ export function useWebSocket() {
         });
 
         const offStepsInit = wsService.on('steps_init', (data) => {
+            const incomingSource = (data.source as string | undefined) || 'ls';
+            const incomingNotFound = Boolean(data.notFound);
             setState(prev => {
                 if (data.conversationId && data.conversationId !== prev.currentConvId) return prev;
                 const incoming = (data.steps as Step[]) || [];
@@ -201,7 +214,7 @@ export function useWebSocket() {
 
                 // Merge: if same base+length, only update steps that actually changed
                 // Prevents visible re-render on auto-refresh after cascade completion
-                if (prev.baseIndex === incomingBase && prev.steps.length === incoming.length) {
+                if (prev.baseIndex === incomingBase && prev.steps.length === incoming.length && incoming.length > 0) {
                     let anyChanged = false;
                     const merged = prev.steps.map((oldStep, i) => {
                         if (i >= incoming.length - 5 && JSON.stringify(oldStep) !== JSON.stringify(incoming[i])) {
@@ -210,8 +223,16 @@ export function useWebSocket() {
                         }
                         return oldStep;
                     });
-                    if (!anyChanged) return prev;
-                    return { ...prev, steps: merged, stepCount: incomingCount, lastUpdate: new Date().toLocaleTimeString() };
+                    if (!anyChanged && !prev.stepsLoading) return prev;
+                    return {
+                        ...prev,
+                        steps: merged,
+                        stepCount: incomingCount,
+                        stepsLoading: false,
+                        convSource: incomingSource,
+                        convNotFound: incomingNotFound,
+                        lastUpdate: new Date().toLocaleTimeString(),
+                    };
                 }
 
                 // Different base/length — full replacement (initial load, conversation switch)
@@ -220,12 +241,16 @@ export function useWebSocket() {
                     steps: incoming,
                     baseIndex: incomingBase,
                     stepCount: incomingCount,
+                    stepsLoading: false,
+                    convSource: incomingSource,
+                    convNotFound: incomingNotFound,
+                    cascadeStatus: incomingSource === 'cli-db' ? 'CASCADE_RUN_STATUS_IDLE' : prev.cascadeStatus,
                     lastUpdate: new Date().toLocaleTimeString(),
                 };
             });
-            // Fetch cascade status on init (handles reload/reconnect)
+            // Fetch cascade status on init only for live LS conversations
             const convId = (data.conversationId as string) || currentConvIdRef.current;
-            if (convId) {
+            if (convId && incomingSource !== 'cli-db' && !incomingNotFound) {
                 getCascadeStatus(convId)
                     .then(s => {
                         setState(prev => {
@@ -339,12 +364,44 @@ export function useWebSocket() {
             steps: [],
             baseIndex: 0,
             stepCount: 0,
+            stepsLoading: Boolean(id),
+            convSource: undefined,
+            convNotFound: false,
             loadingOlder: false,
             cascadeStatus: null,
         }));
-        if (id && wsService) {
+        if (!id) return;
+        if (wsService) {
             wsService.send({ type: 'set_conversation', conversationId: id });
         }
+        // Fallback HTTP fetch if WebSocket hasn't delivered steps within 900ms (or is disconnected)
+        const waitMs = wsService?.connected ? 900 : 50;
+        setTimeout(async () => {
+            if (currentConvIdRef.current !== id) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}/steps`, { headers: authHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                setState(prev => {
+                    if (prev.currentConvId !== id) return prev;
+                    if (prev.steps.length > 0 && !prev.stepsLoading) return prev;
+                    const fetched: Step[] = Array.isArray(data.steps) ? data.steps : [];
+                    return {
+                        ...prev,
+                        steps: fetched,
+                        baseIndex: typeof data.baseIndex === 'number' ? data.baseIndex : 0,
+                        stepCount: typeof data.totalSteps === 'number' ? data.totalSteps : fetched.length,
+                        stepsLoading: false,
+                        convSource: data.source || 'ls',
+                        convNotFound: Boolean(data.notFound || (fetched.length === 0 && data.source === 'none')),
+                        cascadeStatus: data.source === 'cli-db' ? 'CASCADE_RUN_STATUS_IDLE' : prev.cascadeStatus,
+                        lastUpdate: new Date().toLocaleTimeString(),
+                    };
+                });
+            } catch {
+                setState(prev => (prev.currentConvId === id ? { ...prev, stepsLoading: false } : prev));
+            }
+        }, waitMs);
     }, []);
 
     // Load older steps on scroll-up (calls backend binary protobuf endpoint)

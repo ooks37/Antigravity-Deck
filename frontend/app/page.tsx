@@ -100,7 +100,7 @@ function LaunchIdeButton() {
 }
 
 export default function Home() {
-  const { connected, detected, swapping, steps, baseIndex, stepCount, loadingOlder, conversations, currentConvId, cascadeStatus, conversationsVersion, stepContentVersion, workspaceResources, selectConversation, lastUpdate, loadOlder } = useWebSocket();
+  const { connected, detected, swapping, steps, baseIndex, stepCount, loadingOlder, stepsLoading, convNotFound, conversations, currentConvId, cascadeStatus, conversationsVersion, stepContentVersion, workspaceResources, selectConversation, lastUpdate, loadOlder } = useWebSocket();
 
   const [showAnalytics, setShowAnalytics] = useState(() => getStoredValue('antigravity-show-analytics', false));
   const [showTimeline, setShowTimeline] = useState(() => {
@@ -975,6 +975,8 @@ export default function Home() {
                 stepCount={stepCount}
                 loadingOlder={loadingOlder}
                 onLoadOlder={loadOlder}
+                stepsLoading={stepsLoading}
+                convNotFound={convNotFound}
                 currentConvId={currentConvId}
                 currentWorkspace={activeWorkspace}
                 newChatWorkspaceUri={newChatWorkspaceUri}

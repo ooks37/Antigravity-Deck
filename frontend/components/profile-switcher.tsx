@@ -735,6 +735,12 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
                                                             <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-normal">
                                                                 {acc.format === 'agy-cred' ? 'agy 凭据' : 'OAuth JSON'}
                                                             </Badge>
+                                                            {quotaMap[acc.alias]?.tierLabel && (
+                                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-primary/35 text-primary font-medium">
+                                                                    {quotaMap[acc.alias].tierLabel}
+                                                                    {typeof quotaMap[acc.alias].totalModels === 'number' ? ` · ${quotaMap[acc.alias].totalModels} 模型` : ''}
+                                                                </Badge>
+                                                            )}
                                                             {acc.isExpired && (
                                                                 <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-amber-500/30 text-amber-400">
                                                                     {acc.hasRefreshToken ? '访问令牌过期（可自动续期）' : '已过期'}

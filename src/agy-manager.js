@@ -403,28 +403,65 @@ function createAgyManager(deps = {}) {
         }
     }
 
-    async function resolveAgyModelId(model, modelLabel) {
+    const VALID_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+    function normalizeEffort(effort) {
+        if (!effort || typeof effort !== 'string') return null;
+        const clean = effort.trim().toLowerCase();
+        return VALID_EFFORTS.has(clean) ? clean : null;
+    }
+
+    function invalidateModelsCache() {
+        cachedModels = null;
+        cachedModelsAt = 0;
+    }
+
+    async function resolveAgyModelId(model, modelLabel, effort = null) {
         const raw = typeof model === 'string' ? model.trim() : '';
         const lbl = typeof modelLabel === 'string' ? modelLabel.trim() : '';
+        const cleanEffort = normalizeEffort(effort);
         if (!raw && !lbl) return null;
 
         // Already a known agy slug format (lowercase hyphenated, not LS placeholder)
         if (raw && !raw.startsWith('MODEL_') && !raw.includes(' ') && /^[a-z0-9._-]+$/.test(raw)) {
-            return raw;
+            if (!cleanEffort) return raw;
+            const listRes = await getAgyModels().catch(() => null);
+            const available = Array.isArray(listRes?.models) ? listRes.models : [];
+            const baseSlug = raw.replace(/-(low|medium|high|xhigh|max)$/i, '');
+            const byEffort = available.find((m) => m.id.toLowerCase() === `${baseSlug}-${cleanEffort}`);
+            return byEffort ? byEffort.id : raw;
         }
 
         const listRes = await getAgyModels();
         const available = Array.isArray(listRes?.models) ? listRes.models : [];
         const needle = (lbl || raw).toLowerCase();
+        const baseNeedle = needle.replace(/\s*\((low|medium|high|xhigh|max|thinking)\)\s*$/i, '').trim();
+
+        if (cleanEffort && baseNeedle && available.length > 0) {
+            const exactWithEffort = available.find((m) => {
+                const ml = m.label.toLowerCase();
+                return ml === `${baseNeedle} (${cleanEffort})` || m.id.toLowerCase().endsWith(`-${cleanEffort}`) && ml.startsWith(baseNeedle);
+            });
+            if (exactWithEffort) return exactWithEffort.id;
+        }
+
         if (needle && available.length > 0) {
             const byId = available.find((m) => m.id.toLowerCase() === needle);
             if (byId) return byId.id;
             const byLabel = available.find((m) => m.label.toLowerCase() === needle);
             if (byLabel) return byLabel.id;
+            if (baseNeedle) {
+                const byBase = available.find((m) => m.label.toLowerCase().replace(/\s*\((low|medium|high|xhigh|max|thinking)\)\s*$/i, '').trim() === baseNeedle);
+                if (byBase) return byBase.id;
+            }
         }
 
-        // Convert friendly label like "Gemini 3.8 Flash (Low)" -> "gemini-3.8-flash-low" as last-resort heuristic
+        // Convert friendly label like "Gemini 3.8 Flash" + effort "low" -> "gemini-3.8-flash-low"
         if (lbl) {
+            const baseSlug = baseNeedle.replace(/[^a-z0-9.]+/g, '-').replace(/^-|-$/g, '');
+            if (cleanEffort && (!available.length || available.some((m) => m.id === `${baseSlug}-${cleanEffort}`))) {
+                return `${baseSlug}-${cleanEffort}`;
+            }
             const slug = lbl.toLowerCase().replace(/[()]/g, ' ').trim().replace(/[^a-z0-9.]+/g, '-').replace(/^-|-$/g, '');
             if (slug && (!available.length || available.some((m) => m.id === slug))) {
                 return slug;
@@ -433,7 +470,7 @@ function createAgyManager(deps = {}) {
         return raw && !raw.startsWith('MODEL_') ? raw : null;
     }
 
-    async function runAgyPrompt({ prompt, model, modelLabel, workspace, timeoutMs = 120000 } = {}) {
+    async function runAgyPrompt({ prompt, model, modelLabel, effort, conversationId, workspace, timeoutMs = 120000 } = {}) {
         if (!prompt || !String(prompt).trim()) {
             return { statusCode: 400, success: false, error: 'prompt 不能为空' };
         }
@@ -443,9 +480,16 @@ function createAgyManager(deps = {}) {
         }
 
         const args = ['-p', String(prompt).trim(), '--output-format', 'stream-json'];
-        const resolvedModel = await resolveAgyModelId(model, modelLabel).catch(() => null);
+        const cleanEffort = normalizeEffort(effort);
+        const resolvedModel = await resolveAgyModelId(model, modelLabel, cleanEffort).catch(() => null);
         if (resolvedModel) {
             args.push('--model', resolvedModel);
+        }
+        if (cleanEffort) {
+            args.push('--effort', cleanEffort);
+        }
+        if (conversationId && typeof conversationId === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(conversationId.trim())) {
+            args.push('--conversation', conversationId.trim());
         }
         const cwd = workspace && typeof workspace === 'string' && existsSync(workspace) ? workspace : undefined;
 
@@ -457,6 +501,7 @@ function createAgyManager(deps = {}) {
                 success: true,
                 path: binary.path,
                 model: resolvedModel || null,
+                effort: cleanEffort || null,
                 sessionId: parsed.sessionId,
                 text: parsed.text || String(stdout || '').trim(),
                 eventsCount: parsed.eventsCount,
@@ -501,6 +546,7 @@ function createAgyManager(deps = {}) {
         updateAgy,
         runAgyPrompt,
         getAgyModels,
+        invalidateModelsCache,
     };
 }
 

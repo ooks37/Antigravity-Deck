@@ -24,6 +24,7 @@ export const STEP_DISPLAY: Record<string, StepDisplayConfig> = {
     'CORTEX_STEP_TYPE_READ_URL_CONTENT': { role: 'tool', icon: 'Globe', label: '读取网页', show: true },
     'CORTEX_STEP_TYPE_VIEW_CONTENT_CHUNK': { role: 'tool', icon: 'FileSearch', label: '查看片段', show: true },
     'CORTEX_STEP_TYPE_GENERATE_IMAGE': { role: 'tool', icon: 'ImagePlus', label: '生成图片', show: true },
+    'CORTEX_STEP_TYPE_CLI_TOOL': { role: 'tool', icon: 'Wrench', label: '工具调用', show: true },
 };
 
 export function getStepConfig(type: string): StepDisplayConfig {
@@ -186,6 +187,14 @@ export function extractStepContent(step: Step): string | null {
         const name = gi.imageName || 'image';
         const prompt = gi.prompt || '';
         return `🖼️ **${name}**${prompt ? `\n_${prompt}_` : ''}`;
+    }
+
+    if (step.cliTool || type === 'CORTEX_STEP_TYPE_CLI_TOOL') {
+        const ct = step.cliTool || {};
+        const name = ct.name || step.metadata?.toolCall?.name || step.metadata?.name || 'cli_tool';
+        const args = ct.args && Object.keys(ct.args).length > 0 ? JSON.stringify(ct.args).slice(0, 180) : (step.metadata?.argumentsJson || '').slice(0, 180);
+        const res = ct.result ? ct.result.trim().slice(0, 400) : '';
+        return [`🔧 **${name}**${args ? `\n\`${args}\`` : ''}`, res ? `\`\`\`\n${res}\n\`\`\`` : ''].filter(Boolean).join('\n');
     }
 
     if (step.metadata?.argumentsJson) {
