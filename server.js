@@ -331,10 +331,11 @@ server.listen(PORT, async () => {
     console.warn('  ⚠️  Push service init failed:', e.message);
   }
 
+  const { startResourceMonitor } = require('./src/resource-monitor');
+  startResourceMonitor();
+
   if (IDE_HUB_ENABLED) {
     await init(() => startPolling());
-    const { startResourceMonitor } = require('./src/resource-monitor');
-    startResourceMonitor();
     startAutoRescan();
     try { require('./src/jetbox').start(); } catch (e) { console.warn('  ⚠️  Jetbox start failed:', e.message); }
   } else {
