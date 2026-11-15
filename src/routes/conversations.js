@@ -31,16 +31,51 @@ function clearCache() {
     return cleanupAll();
 }
 
-function matchCloudCodeEntry(modelSlug, rawModelsMap) {
-    if (!rawModelsMap || typeof rawModelsMap !== 'object' || !modelSlug) return null;
+const GEMINI_POOL_FALLBACK_KEYS = [
+    'gemini-3.8-flash-tiered',
+    'gemini-3-flash',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+];
+
+function matchCloudCodeWithMeta(modelSlug, rawModelsMap) {
+    if (!rawModelsMap || typeof rawModelsMap !== 'object' || !modelSlug) return { entry: null, exact: false };
     const lower = String(modelSlug).toLowerCase();
-    if (rawModelsMap[lower]) return rawModelsMap[lower];
+    if (rawModelsMap[lower]) return { entry: rawModelsMap[lower], exact: true };
     const base = lower.replace(/-(low|medium|high|xhigh|max|thinking)$/i, '');
     const candidates = [base, `${base}-tiered`, `${base}-thinking`, `${base}-medium`];
     for (const key of candidates) {
-        if (rawModelsMap[key]) return rawModelsMap[key];
+        if (rawModelsMap[key]) return { entry: rawModelsMap[key], exact: true };
     }
-    return null;
+
+    // Newer CLI models (e.g. gemini-4-argon-*, gemini-4-hydrogen-*, gemini-pro-orchestrator-*)
+    // share the same CloudCode quota pool as the primary model in that family.
+    if (lower.startsWith('gemini-')) {
+        for (const key of GEMINI_POOL_FALLBACK_KEYS) {
+            if (rawModelsMap[key]?.quotaInfo) return { entry: rawModelsMap[key], exact: false };
+        }
+        const anyGemini = Object.entries(rawModelsMap).find(([k, v]) =>
+            k.startsWith('gemini-') && !k.includes('image') && !v?.isInternal && v?.quotaInfo
+        );
+        if (anyGemini) return { entry: anyGemini[1], exact: false };
+    } else if (lower.startsWith('claude-')) {
+        const anyClaude = Object.entries(rawModelsMap).find(([k, v]) =>
+            k.startsWith('claude-') && !v?.isInternal && v?.quotaInfo
+        );
+        if (anyClaude) return { entry: anyClaude[1], exact: false };
+    } else if (lower.startsWith('gpt-')) {
+        const anyGpt = Object.entries(rawModelsMap).find(([k, v]) =>
+            k.startsWith('gpt-') && !v?.isInternal && v?.quotaInfo
+        );
+        if (anyGpt) return { entry: anyGpt[1], exact: false };
+    }
+    return { entry: null, exact: false };
+}
+
+function matchCloudCodeEntry(modelSlug, rawModelsMap) {
+    return matchCloudCodeWithMeta(modelSlug, rawModelsMap).entry;
 }
 
 function matchCloudCodeQuota(modelSlug, rawModelsMap) {
@@ -69,17 +104,23 @@ function buildCliFallbackModels(agyModels, activeSummary) {
     const rawMap = activeSummary?.rawModelsMap || {};
     const sourceModels = Array.isArray(agyModels) && agyModels.length > 0
         ? agyModels.map((m) => {
-            const entry = matchCloudCodeEntry(m.id, rawMap);
+            const { entry, exact } = matchCloudCodeWithMeta(m.id, rawMap);
             const qi = entry?.quotaInfo || null;
+            const slugLower = String(m.id || '').toLowerCase();
+            // Flagship Gemini 4 models should be recommended when the shared Gemini pool is active,
+            // whereas orchestrator helper slugs stay non-default unless CloudCode explicitly recommends them.
+            const isRecommended = exact
+                ? Boolean(entry?.recommended)
+                : (/^gemini-4-/.test(slugLower) && Boolean(entry?.recommended));
             return {
                 label: m.label || entry?.displayName || m.id,
                 modelId: m.id,
                 cliModelId: m.id,
                 supportsImages: entry ? Boolean(entry.supportsImages) : true,
-                isRecommended: Boolean(entry?.recommended),
+                isRecommended,
                 isBeta: false,
-                tagTitle: entry?.tagTitle || '',
-                tagDescription: entry?.tagDescription || '',
+                tagTitle: exact ? (entry?.tagTitle || '') : (/^gemini-4-/.test(slugLower) ? 'New' : ''),
+                tagDescription: exact ? (entry?.tagDescription || '') : '',
                 quota: typeof qi?.remainingFraction === 'number' ? qi.remainingFraction : 1,
                 resetTime: qi?.resetTime || null,
             };
@@ -464,3 +505,5 @@ module.exports = function setupConversationsRoutes(app) {
         }
     });
 };
+
+module.exports.buildCliFallbackModels = buildCliFallbackModels;

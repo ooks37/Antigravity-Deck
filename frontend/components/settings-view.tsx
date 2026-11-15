@@ -173,11 +173,13 @@ export function SettingsView() {
         agyBinaryPath.trim() !== (settings.agyBinaryPath || '')
     );
 
-    const geminiModels = models.filter(m => m.label.toLowerCase().includes('gemini'));
-    const claudeModels = models.filter(m => m.label.toLowerCase().includes('claude'));
-    const otherModels = models.filter(m =>
-        !m.label.toLowerCase().includes('gemini') && !m.label.toLowerCase().includes('claude')
-    );
+    const isGeminiModel = (m: Model) =>
+        m.label.toLowerCase().includes('gemini') || m.modelId.toLowerCase().includes('gemini');
+    const isClaudeModel = (m: Model) =>
+        m.label.toLowerCase().includes('claude') || m.modelId.toLowerCase().includes('claude');
+    const geminiModels = models.filter(isGeminiModel);
+    const claudeModels = models.filter(isClaudeModel);
+    const otherModels = models.filter(m => !isGeminiModel(m) && !isClaudeModel(m));
 
     const getModelIcon = (label: string) => {
         if (label.toLowerCase().includes('gemini')) return <Sparkles className="h-3.5 w-3.5 text-sky-400" />;

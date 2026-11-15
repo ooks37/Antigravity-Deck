@@ -596,12 +596,15 @@ function createAgyManager(deps = {}) {
         const ageMs = Date.now() - cachedModelsAt;
         const currentStamp = getCredentialStamp();
         const sameCreds = !cachedModelsKey || cachedModelsKey === currentStamp;
-        if (!force && cachedModels && sameCreds) {
-            // Fresh within 5 min; stale-while-revalidate up to 12 hours so /api/models never blocks
-            if (ageMs < 300000) {
+        if (cachedModels && sameCreds) {
+            if (force && ageMs < 8000) {
                 return { statusCode: 200, success: true, ...cachedModels };
             }
-            if (ageMs < 43200000) {
+            // Fresh within 5 min; stale-while-revalidate up to 12 hours so /api/models never blocks
+            if (!force && ageMs < 300000) {
+                return { statusCode: 200, success: true, ...cachedModels };
+            }
+            if (!force && ageMs < 43200000) {
                 refreshAgyModelsLocked().catch(() => {});
                 return { statusCode: 200, success: true, ...cachedModels };
             }

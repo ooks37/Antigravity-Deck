@@ -192,6 +192,11 @@ async function runTest(name, fn) {
         assert.strictEqual(cachedAgain.models.length, 2);
         assert.strictEqual(modelsCallCount, 1);
 
+        // Repeated force refreshes within the short dedup window reuse fresh cache
+        const forceWithinWindow = await mgr.getAgyModels({ force: true });
+        assert.strictEqual(forceWithinWindow.models.length, 2);
+        assert.strictEqual(modelsCallCount, 1);
+
         currentList += 'gemini-4-argon-medium\tGemini 4 Argon (Medium)\n';
         mgr.invalidateModelsCache();
         const refreshed = await mgr.getAgyModels();

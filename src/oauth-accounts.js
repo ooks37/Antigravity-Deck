@@ -952,7 +952,7 @@ async function fetchAccountQuota(alias, opts = {}) {
 function formatCachedQuota(cached, includeRaw) {
     if (!cached) return null;
     if (includeRaw) return cached;
-    const { rawModelsMap: _raw, ...clean } = cached;
+    const { rawModelsMap: _raw, models: _models, ...clean } = cached;
     return clean;
 }
 

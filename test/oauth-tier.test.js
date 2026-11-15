@@ -1,5 +1,6 @@
 const assert = require('assert');
 const { classifyAccountTier } = require('../src/oauth-accounts');
+const { buildCliFallbackModels } = require('../src/routes/conversations');
 
 let passed = 0;
 let failed = 0;
@@ -80,6 +81,50 @@ async function runTest(name, fn) {
         });
         assert.strictEqual(ultra.tierId, 'ultra');
         assert.strictEqual(ultra.tierLabel, 'AI Ultra');
+    });
+
+    await runTest('buildCliFallbackModels maps CloudCode Gemini pool quota/reset/rec to Gemini 4 and Orchestrator', () => {
+        const res = buildCliFallbackModels(
+            [
+                { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+                { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
+                { id: 'gemini-pro-orchestrator-g1-pro', label: 'Orchestrator (Argon)' },
+                { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+                { id: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
+                { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
+            ],
+            {
+                rawModelsMap: {
+                    'gemini-3.8-flash-tiered': {
+                        recommended: true,
+                        supportsImages: true,
+                        quotaInfo: { remainingFraction: 0.25, resetTime: '2026-11-15T16:13:31Z' },
+                    },
+                    'claude-sonnet-5-5-medium': {
+                        recommended: true,
+                        supportsImages: true,
+                        tagTitle: 'New',
+                        quotaInfo: { remainingFraction: 0.9, resetTime: '2026-11-15T19:12:06Z' },
+                    },
+                    'gpt-oss-120b-medium': {
+                        recommended: true,
+                        supportsImages: false,
+                        quotaInfo: { remainingFraction: 0.9, resetTime: '2026-11-15T19:12:06Z' },
+                    },
+                },
+            },
+        );
+        const byId = Object.fromEntries(res.models.map((m) => [m.modelId, m]));
+        assert.strictEqual(byId['gemini-4-argon-medium'].quota, 0.25);
+        assert.strictEqual(byId['gemini-4-argon-medium'].resetTime, '2026-11-15T16:13:31Z');
+        assert.strictEqual(byId['gemini-4-argon-medium'].isRecommended, true);
+        assert.strictEqual(byId['gemini-4-hydrogen-high'].quota, 0.25);
+        assert.strictEqual(byId['gemini-pro-orchestrator-g1-pro'].quota, 0.25);
+        assert.strictEqual(byId['gemini-pro-orchestrator-g1-pro'].resetTime, '2026-11-15T16:13:31Z');
+        assert.strictEqual(byId['gemini-pro-orchestrator-g1-pro'].isRecommended, false);
+        assert.strictEqual(res.defaultModel, 'gemini-4-argon-medium');
+        assert.deepStrictEqual(res.groups.map((g) => g.name), ['Gemini', 'Claude', 'GPT / OpenAI']);
+        assert.ok(res.groups[0].models.some((m) => m.modelId === 'gemini-pro-orchestrator-g1-pro'));
     });
 
     console.log(`\nResults: ${passed} passed, ${failed} failed\n`);

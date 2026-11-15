@@ -61,14 +61,27 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
         }).catch(() => { });
     }, [currentConvId, wsVersion]);
 
-    // Load models on mount
-    useEffect(() => {
+    // Load models on mount and whenever active OAuth account changes
+    const loadModels = useCallback(() => {
         getModels().then(({ models: m, groups, defaultModel }) => {
             setModels(m);
             setModelGroups(groups || []);
-            setSelectedModelId(prev => prev || defaultModel || m[0]?.modelId || '');
+            setSelectedModelId(prev => (prev && m.some(item => item.modelId === prev)) ? prev : (defaultModel || m[0]?.modelId || ''));
         }).catch(() => { });
     }, []);
+
+    useEffect(() => {
+        loadModels();
+        const onSwap = () => {
+            getModels(true).then(({ models: m, groups, defaultModel }) => {
+                setModels(m);
+                setModelGroups(groups || []);
+                setSelectedModelId(prev => (prev && m.some(item => item.modelId === prev)) ? prev : (defaultModel || m[0]?.modelId || ''));
+            }).catch(() => { });
+        };
+        window.addEventListener('oauth-account-swapped', onSwap);
+        return () => window.removeEventListener('oauth-account-swapped', onSwap);
+    }, [loadModels]);
 
     // When parent tells us which workspace the selected cascade belongs to, track it
     useEffect(() => {

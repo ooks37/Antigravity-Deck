@@ -189,9 +189,27 @@ export function useWebSocket() {
             }
         });
 
+        // Track recent local OAuth swaps so the server's WS broadcast echo does not trigger a second duplicate model refresh
+        let lastLocalSwapAlias: string | null = null;
+        let lastLocalSwapAt = 0;
+        const onLocalOAuthSwap = (ev: Event) => {
+            const detail = (ev as CustomEvent)?.detail;
+            if (!detail || detail.fromWs) return;
+            lastLocalSwapAlias = detail.activeAlias || detail.alias || null;
+            lastLocalSwapAt = Date.now();
+        };
+        if (typeof window !== 'undefined') {
+            window.addEventListener('oauth-account-swapped', onLocalOAuthSwap);
+        }
+
         const offOAuthSwapped = wsService.on('oauth_account_swapped', (data) => {
             if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('oauth-account-swapped', { detail: data }));
+                const wsAlias = (data?.activeAlias as string) || (data?.alias as string) || null;
+                const isRecentSelfEcho =
+                    Date.now() - lastLocalSwapAt < 5000 &&
+                    (!lastLocalSwapAlias || !wsAlias || wsAlias === lastLocalSwapAlias);
+                if (isRecentSelfEcho) return;
+                window.dispatchEvent(new CustomEvent('oauth-account-swapped', { detail: { ...data, fromWs: true } }));
             }
         });
 
@@ -340,6 +358,9 @@ export function useWebSocket() {
         });
 
         return () => {
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('oauth-account-swapped', onLocalOAuthSwap);
+            }
             offOpen();
             offClose();
             offStatus();

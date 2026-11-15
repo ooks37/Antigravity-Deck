@@ -124,11 +124,18 @@ export function AccountInfoView({ detected = true, onBackHome }: AccountInfoView
                     setModels([]);
                 }
             } else {
-                const profRes = await profTask.catch(() => null);
-                setProfileData(profRes);
+                const [profRes, modelsRes] = await Promise.allSettled([
+                    profTask,
+                    fetch(`${API_BASE}/api/models`, { headers: authHeaders() }).then(r => (r.ok ? r.json() : null)),
+                ]);
+                setProfileData(profRes.status === 'fulfilled' ? profRes.value : null);
                 setUser(null);
                 setProfilePic(null);
-                setModels([]);
+                if (modelsRes.status === 'fulfilled' && modelsRes.value) {
+                    setModels(modelsRes.value.models || []);
+                } else {
+                    setModels([]);
+                }
             }
         } finally {
             setLoading(false);
@@ -260,12 +267,12 @@ export function AccountInfoView({ detected = true, onBackHome }: AccountInfoView
                 {/* Cross-platform Multi-Account Hub */}
                 <ProfileSwitcher detected={detected} onAccountChanged={loadData} />
 
-                {/* Model Usage (when IDE Language Server is connected) */}
+                {/* Model Usage */}
                 {models.length > 0 && (
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
                             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                                <User className="h-3.5 w-3.5" /> 模型余量统计
+                                <User className="h-3.5 w-3.5" /> 当前账号可用模型与余量
                             </h3>
                             <span className="text-[11px] text-muted-foreground">共 {models.length} 个模型</span>
                         </div>
