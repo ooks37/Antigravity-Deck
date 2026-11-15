@@ -163,7 +163,8 @@ class NotificationService {
         }
       } else {
         try {
-          this._swRegistration = await navigator.serviceWorker.register('/sw.js');
+          this._swRegistration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+          this._swRegistration.update().catch(() => {});
           console.log('[Notifications] SW registered:', this._swRegistration.scope);
         } catch (e) {
           console.warn('[Notifications] SW registration failed:', e);

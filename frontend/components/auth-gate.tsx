@@ -139,6 +139,20 @@ export function AuthGate({ children }: AuthGateProps) {
         const savedUser = getRememberedUsername();
         if (savedUser) setUsername(savedUser);
         checkSession();
+
+        if (!('serviceWorker' in navigator)) return;
+        const hadController = Boolean(navigator.serviceWorker.controller);
+        let reloading = false;
+        const onControllerChange = () => {
+            if (!hadController || reloading) return;
+            reloading = true;
+            window.location.reload();
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+            for (const reg of regs) reg.update().catch(() => {});
+        }).catch(() => {});
+        return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
     }, [checkSession]);
 
     useEffect(() => {
