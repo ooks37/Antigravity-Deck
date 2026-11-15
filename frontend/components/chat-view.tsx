@@ -406,7 +406,12 @@ export function ChatView({
             setPendingImages([]);
             setCliTurns((prev) => [...prev, { id: turnId, prompt: text, reply: null, pending: true }]);
             try {
-                const res = await runAgyQuick({ prompt: text, model: selectedModel || undefined });
+                const selectedLabel = models.find((m) => m.modelId === selectedModel)?.label;
+                const res = await runAgyQuick({
+                    prompt: text,
+                    model: selectedModel || undefined,
+                    modelLabel: selectedLabel,
+                });
                 setCliTurns((prev) => prev.map((t) => (t.id === turnId
                     ? { ...t, pending: false, reply: res.text || '', error: res.success ? null : (res.error || 'agy 执行失败') }
                     : t)));
@@ -462,7 +467,7 @@ export function ChatView({
         } finally {
             setSending(false);
         }
-    }, [input, sending, activeCascadeId, selectedModel, pendingImages, pendingFiles, targetServer, useAgyCli, detected, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
+    }, [input, sending, activeCascadeId, selectedModel, models, pendingImages, pendingFiles, targetServer, useAgyCli, detected, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
 
     // Image handling — shared processor for adding files to pending images
     const processImageFile = useCallback((file: File) => {

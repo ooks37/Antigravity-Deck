@@ -117,6 +117,54 @@ async function runTest(name, fn) {
         assert.strictEqual(afterStatus.version, '1.6.0');
     });
 
+    await runTest('parseAgyModels & parseAgyStreamJson extract models and final agent response cleanly', async () => {
+        const { parseAgyModels, parseAgyStreamJson } = require('../src/agy-manager');
+        const models = parseAgyModels(
+            'Fetching available models...\n' +
+            'gemini-4-argon-medium\tGemini 4 Argon (Medium)\n' +
+            'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n',
+        );
+        assert.deepStrictEqual(models, [
+            { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+            { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+        ]);
+
+        const ndjson = [
+            JSON.stringify({ event: 'init', conversation_id: 'conv-123' }),
+            JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'conv-123', step_type: 'agent_response', text_delta: '82 主机 ' } }),
+            JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'conv-123', step_type: 'agent_response', text_delta: '在线' } }),
+            JSON.stringify({ event: 'result', result: { conversation_id: 'conv-123', status: 'SUCCESS', response: '82 主机正常，负载 0.12。\n' } }),
+        ].join('\n');
+        const parsed = parseAgyStreamJson(ndjson);
+        assert.strictEqual(parsed.sessionId, 'conv-123');
+        assert.strictEqual(parsed.text, '82 主机正常，负载 0.12。');
+        assert.strictEqual(parsed.eventsCount, 4);
+
+        const fakeBin = '/usr/local/bin/agy';
+        let capturedArgs = null;
+        const mgr = createAgyManager({
+            getSettings: () => ({ agyBinaryPath: fakeBin }),
+            existsSync: (p) => p === fakeBin,
+            statSync: () => ({ isFile: () => true }),
+            execFileAsync: async (_bin, args) => {
+                if (args[0] === 'models') {
+                    return { stdout: 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n', stderr: '' };
+                }
+                capturedArgs = args;
+                return { stdout: ndjson, stderr: '' };
+            },
+        });
+        const runRes = await mgr.runAgyPrompt({
+            prompt: 'check 82',
+            model: 'MODEL_PLACEHOLDER_M999',
+            modelLabel: 'Gemini 3.8 Flash (Low)',
+        });
+        assert.strictEqual(runRes.statusCode, 200);
+        assert.strictEqual(runRes.model, 'gemini-3.8-flash-low');
+        assert.strictEqual(runRes.text, '82 主机正常，负载 0.12。');
+        assert.ok(capturedArgs.includes('gemini-3.8-flash-low'));
+    });
+
     console.log(`\nResults: ${passed} passed, ${failed} failed\n`);
     process.exit(failed > 0 ? 1 : 0);
 })();

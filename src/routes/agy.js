@@ -51,10 +51,11 @@ module.exports = function setupAgyRoutes(app) {
 
     app.post('/api/agy/run', async (req, res) => {
         try {
-            const { prompt, model, workspace, timeoutMs } = req.body || {};
+            const { prompt, model, modelLabel, workspace, timeoutMs } = req.body || {};
             const result = await agyManager.runAgyPrompt({
                 prompt,
                 model,
+                modelLabel,
                 workspace,
                 timeoutMs: Number(timeoutMs) || 120000,
             });

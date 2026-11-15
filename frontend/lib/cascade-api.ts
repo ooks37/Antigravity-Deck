@@ -622,6 +622,7 @@ export async function completeOAuthCallback(payload: {
 export async function runAgyQuick(payload: {
     prompt: string;
     model?: string;
+    modelLabel?: string;
     workspace?: string;
 }): Promise<{ success: boolean; text?: string; sessionId?: string | null; error?: string }> {
     return apiJson(`${API_BASE}/api/agy/run`, {
