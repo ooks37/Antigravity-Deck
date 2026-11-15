@@ -15,7 +15,8 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { TokenUsage } from './token-usage';
 import { cn } from '@/lib/utils';
-import { SourceControlView } from './source-control-view';
+import dynamic from 'next/dynamic';
+const SourceControlView = dynamic(() => import('./source-control-view').then(m => ({ default: m.SourceControlView })), { ssr: false });
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -70,6 +71,7 @@ import { GeneratedImageStep } from './chat/generated-image-step';
 import { StreamingIndicator } from './chat/streaming-indicator';
 import { DoubaoWelcome } from './chat/doubao-welcome';
 import { TieredModelPicker, EffortPicker } from './chat/tiered-model-picker';
+import { AccountSwitcherPill } from './chat/account-switcher-pill';
 import {
     type EffortLevel,
     groupModelsByFamily,
@@ -149,7 +151,8 @@ export function ChatView({
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [selectedWs, setSelectedWs] = useState<number | null>(null);
     const [models, setModels] = useState<CascadeModel[]>([]);
-    const [, setModelGroups] = useState<CascadeModelGroup[]>([]);
+    const [modelGroups, setModelGroups] = useState<CascadeModelGroup[]>([]);
+    const [modelsLoading, setModelsLoading] = useState(false);
     const [activeAccount, setActiveAccount] = useState<ActiveModelAccount | null>(null);
     const [hubSyncing, setHubSyncing] = useState(false);
     const [selectedModel, setSelectedModel] = useState<string>('');
@@ -404,10 +407,23 @@ export function ChatView({
         fetchWorkflows(currentWorkspace || undefined).then(setWorkflows).catch(() => { });
     }, [wsVersion, currentWorkspace, isAdmin]);
 
+    const refreshActiveModels = useCallback(async () => {
+        setModelsLoading(true);
+        try {
+            const m = await getModels(true);
+            applyModelsResponse(m, undefined, true);
+        } catch {
+            /* keep previous models on transient error */
+        } finally {
+            setModelsLoading(false);
+        }
+    }, []);
+
     // Refresh models & tier info automatically when OAuth account swaps or LS reconnects
     useEffect(() => {
-        const reloadModels = () => {
-            getModels(true).then((m) => applyModelsResponse(m, undefined, true)).catch(() => { });
+        const reloadModels = (ev: Event) => {
+            if ((ev as CustomEvent)?.detail?.source === 'picker') return;
+            refreshActiveModels();
         };
         window.addEventListener('oauth-account-swapped', reloadModels);
         window.addEventListener('ls-detected', reloadModels);
@@ -419,7 +435,7 @@ export function ChatView({
                 hubSyncTimerRef.current = null;
             }
         };
-    }, []);
+    }, [refreshActiveModels]);
 
     // Apply prefilled prompt from quick actions
     useEffect(() => {
@@ -1145,15 +1161,17 @@ export function ChatView({
                         <div className="max-w-3xl mx-auto rounded-2xl border border-border/80 bg-card shadow-[0_6px_24px_rgba(0,0,0,0.06)] px-3 pt-2.5 pb-2 space-y-2">
                             {/* Pickers row */}
                             <div className="flex items-center gap-1.5 text-xs flex-wrap">
-                                {/* Doubao Tiered Model Picker & Decoupled Effort Picker */}
+                                {/* Categorized Model Picker, Effort Picker, & Integrated agy Account Switcher */}
                                 <TieredModelPicker
                                     models={models}
+                                    groups={modelGroups}
                                     selectedModel={selectedModel}
                                     selectedEffort={selectedEffort}
                                     onSelectModel={setSelectedModel}
                                     onSelectEffort={handleSelectEffort}
                                     activeAccount={activeAccount}
                                     hubSyncing={hubSyncing}
+                                    loading={modelsLoading}
                                 />
                                 <EffortPicker
                                     models={models}
@@ -1162,6 +1180,14 @@ export function ChatView({
                                     onSelectModel={setSelectedModel}
                                     onSelectEffort={handleSelectEffort}
                                 />
+                                {isAdmin && (
+                                    <AccountSwitcherPill
+                                        activeAccount={activeAccount}
+                                        detected={Boolean(detected)}
+                                        onSwitched={refreshActiveModels}
+                                        onOpenAccounts={onOpenAccounts}
+                                    />
+                                )}
 
                                 {/* 3-mode Execution Guard Pill (admin only when Hub IDE active) */}
                                 {isAdmin && detected && (

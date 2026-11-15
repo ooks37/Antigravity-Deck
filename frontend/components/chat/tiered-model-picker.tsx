@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
-import type { ActiveModelAccount, CascadeModel } from '@/lib/cascade-api';
+import type { ActiveModelAccount, CascadeModel, CascadeModelGroup } from '@/lib/cascade-api';
 import {
     groupModelsByFamily,
     findFamilyByModelId,
@@ -12,19 +12,29 @@ import {
     formatResetCountdown,
     detectProvider,
     type EffortLevel,
+    type ModelFamily,
 } from '@/lib/model-tiers';
 import { cn } from '@/lib/utils';
-import { Sparkles, CircleDot, Bot, ChevronDown, Check, Clock, Zap, Brain } from 'lucide-react';
+import { Sparkles, CircleDot, Bot, ChevronDown, Check, Clock, Zap, Brain, Loader2 } from 'lucide-react';
 
 interface TieredModelPickerProps {
     models: CascadeModel[];
+    groups?: CascadeModelGroup[];
     selectedModel: string;
     selectedEffort: EffortLevel;
     onSelectModel: (modelId: string) => void;
     onSelectEffort?: (effort: EffortLevel) => void;
     activeAccount?: ActiveModelAccount | null;
     hubSyncing?: boolean;
+    loading?: boolean;
 }
+
+const PROVIDER_CATEGORY_LABEL: Record<ModelFamily['provider'], string> = {
+    gemini: 'Gemini 系列',
+    claude: 'Claude 系列',
+    openai: 'GPT / OpenAI',
+    other: '其他模型',
+};
 
 function ProviderIcon({ provider }: { provider: 'gemini' | 'claude' | 'openai' | 'other' }) {
     if (provider === 'gemini') return <Sparkles className="h-3.5 w-3.5 text-sky-500 shrink-0" />;
@@ -35,12 +45,14 @@ function ProviderIcon({ provider }: { provider: 'gemini' | 'claude' | 'openai' |
 
 export function TieredModelPicker({
     models,
+    groups = [],
     selectedModel,
     selectedEffort,
     onSelectModel,
     onSelectEffort,
     activeAccount,
     hubSyncing = false,
+    loading = false,
 }: TieredModelPickerProps) {
     const [open, setOpen] = useState(false);
     const pickerRef = useRef<HTMLDivElement>(null);
@@ -56,6 +68,26 @@ export function TieredModelPicker({
     }, []);
 
     const families = useMemo(() => groupModelsByFamily(models), [models]);
+    // Group model families into dynamic categories (prefer server groups when categorized, else by provider)
+    const categorizedSections = useMemo(() => {
+        const meaningfulGroups = groups.filter((g) => g.name && g.models.length > 0 && g.name !== 'Models');
+        if (meaningfulGroups.length > 1) {
+            return meaningfulGroups.map((g) => ({
+                category: g.name,
+                provider: detectProvider(g.name + ' ' + (g.models[0]?.modelId || '')),
+                families: groupModelsByFamily(g.models),
+            }));
+        }
+        const map = new Map<string, { category: string; provider: ModelFamily['provider']; families: ModelFamily[] }>();
+        for (const fam of families) {
+            const cat = PROVIDER_CATEGORY_LABEL[fam.provider];
+            if (!map.has(cat)) {
+                map.set(cat, { category: cat, provider: fam.provider, families: [] });
+            }
+            map.get(cat)!.families.push(fam);
+        }
+        return Array.from(map.values());
+    }, [families, groups]);
     const current = models.find((m) => m.modelId === selectedModel) || models[0];
     const currentFamily = findFamilyByModelId(families, current?.modelId);
     const displayName = currentFamily?.family || current?.label || '选择模型';
@@ -73,7 +105,10 @@ export function TieredModelPicker({
                 )}
                 title={activeAccount?.tierLabel ? `切换模型 · 当前账号权益: ${activeAccount.tierLabel}` : '切换模型'}
             >
-                <ProviderIcon provider={currentProvider} />
+                {loading
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                    : <ProviderIcon provider={currentProvider} />
+                }
                 <span className="truncate font-medium">{displayName}</span>
                 {current && typeof current.quota === 'number' && (
                     <span className={cn(
@@ -87,9 +122,11 @@ export function TieredModelPicker({
             </button>
 
             {open && (
-                <div className="absolute bottom-full left-0 mb-2 w-[300px] sm:w-[340px] max-h-[62vh] overflow-y-auto rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl z-50 p-2 space-y-1">
+                <div className="absolute bottom-full left-0 mb-2 w-[310px] sm:w-[350px] max-h-[62vh] overflow-y-auto rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl z-50 p-2 space-y-2">
                     <div className="px-2 py-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground border-b border-border/50">
-                        <span className="font-medium text-foreground/90">选择模型</span>
+                        <span className="font-medium text-foreground/90">
+                            选择模型 ({families.length})
+                        </span>
                         <div className="flex items-center gap-1.5 min-w-0">
                             {activeAccount?.tierLabel && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary truncate max-w-[160px]">
@@ -102,86 +139,99 @@ export function TieredModelPicker({
                         </div>
                     </div>
 
-                    {families.length === 0 ? (
-                        <div className="py-6 text-center text-xs text-muted-foreground">暂无可用模型</div>
+                    {categorizedSections.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-muted-foreground">
+                            {loading ? '正在拉取当前账号真实模型...' : '暂无可用模型'}
+                        </div>
                     ) : (
-                        families.map((fam) => {
-                            const isSelectedFamily = currentFamily?.family === fam.family;
-                            const targetVariant = pickVariantForEffort(fam, selectedEffort);
-                            const pct = formatQuotaPercent(targetVariant?.quota);
-                            const countdown = formatResetCountdown(targetVariant?.resetTime);
-                            const exhausted = (targetVariant?.quota ?? 1) <= 0.01;
+                        categorizedSections.map((section) => (
+                            <div key={section.category} className="space-y-1">
+                                <div className="px-2 pt-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    <span className="inline-flex items-center gap-1">
+                                        <ProviderIcon provider={section.provider} />
+                                        <span>{section.category}</span>
+                                    </span>
+                                    <span className="font-mono text-[9px] opacity-75">{section.families.length}</span>
+                                </div>
+                                {section.families.map((fam) => {
+                                    const isSelectedFamily = currentFamily?.family === fam.family;
+                                    const targetVariant = pickVariantForEffort(fam, selectedEffort);
+                                    const pct = formatQuotaPercent(targetVariant?.quota);
+                                    const countdown = formatResetCountdown(targetVariant?.resetTime);
+                                    const exhausted = (targetVariant?.quota ?? 1) <= 0.01;
 
-                            return (
-                                <button
-                                    key={fam.family}
-                                    type="button"
-                                    onClick={() => {
-                                        if (targetVariant) {
-                                            onSelectModel(targetVariant.modelId);
-                                            if (onSelectEffort && targetVariant.effort !== 'standard') {
-                                                onSelectEffort(targetVariant.effort);
-                                            }
-                                            setOpen(false);
-                                        }
-                                    }}
-                                    className={cn(
-                                        'w-full rounded-xl px-2.5 py-2 border transition-colors text-left cursor-pointer space-y-1',
-                                        isSelectedFamily
-                                            ? 'bg-primary/8 border-primary/35'
-                                            : 'bg-transparent border-transparent hover:bg-muted/60'
-                                    )}
-                                >
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                                            <ProviderIcon provider={fam.provider} />
-                                            <span className={cn('text-xs font-semibold truncate', exhausted && 'text-muted-foreground line-through')}>
-                                                {fam.family}
-                                            </span>
-                                            {fam.isRecommended && (
-                                                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
-                                                    推荐
-                                                </span>
+                                    return (
+                                        <button
+                                            key={fam.family}
+                                            type="button"
+                                            onClick={() => {
+                                                if (targetVariant) {
+                                                    onSelectModel(targetVariant.modelId);
+                                                    if (onSelectEffort && targetVariant.effort !== 'standard') {
+                                                        onSelectEffort(targetVariant.effort);
+                                                    }
+                                                    setOpen(false);
+                                                }
+                                            }}
+                                            className={cn(
+                                                'w-full rounded-xl px-2.5 py-2 border transition-colors text-left cursor-pointer space-y-1',
+                                                isSelectedFamily
+                                                    ? 'bg-primary/8 border-primary/35'
+                                                    : 'bg-transparent border-transparent hover:bg-muted/60'
                                             )}
-                                            {targetVariant?.tagTitle && (
-                                                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0 inline-flex items-center gap-0.5">
-                                                    <Zap className="h-2.5 w-2.5" /> {targetVariant.tagTitle}
-                                                </span>
-                                            )}
-                                        </div>
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                    <ProviderIcon provider={fam.provider} />
+                                                    <span className={cn('text-xs font-semibold truncate', exhausted && 'text-muted-foreground line-through')}>
+                                                        {fam.family}
+                                                    </span>
+                                                    {fam.isRecommended && (
+                                                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+                                                            推荐
+                                                        </span>
+                                                    )}
+                                                    {targetVariant?.tagTitle && (
+                                                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0 inline-flex items-center gap-0.5">
+                                                            <Zap className="h-2.5 w-2.5" /> {targetVariant.tagTitle}
+                                                        </span>
+                                                    )}
+                                                </div>
 
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            {isSelectedFamily && <Check className="h-3.5 w-3.5 text-primary" />}
-                                            <span className={cn(
-                                                'text-[10px] font-mono w-8 text-right',
-                                                pct <= 15 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'
-                                            )}>
-                                                {pct}%
-                                            </span>
-                                        </div>
-                                    </div>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    {isSelectedFamily && <Check className="h-3.5 w-3.5 text-primary" />}
+                                                    <span className={cn(
+                                                        'text-[10px] font-mono w-8 text-right',
+                                                        pct <= 15 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'
+                                                    )}>
+                                                        {pct}%
+                                                    </span>
+                                                </div>
+                                            </div>
 
-                                    <div className="flex items-center justify-between gap-2 pl-5">
-                                        <div className="w-24 h-1 rounded-full bg-muted overflow-hidden">
-                                            <div
-                                                className={cn(
-                                                    'h-full rounded-full',
-                                                    pct > 30 ? 'bg-emerald-500' : pct > 10 ? 'bg-amber-500' : 'bg-rose-500'
-                                                )}
-                                                style={{ width: `${pct}%` }}
-                                            />
-                                        </div>
-                                        {countdown ? (
-                                            <span className="text-[9px] text-muted-foreground inline-flex items-center gap-0.5 shrink-0">
-                                                <Clock className="h-2.5 w-2.5" /> {countdown}
-                                            </span>
-                                        ) : fam.supportsThinking ? (
-                                            <span className="text-[9px] text-muted-foreground/75 shrink-0">支持调节思考程度</span>
-                                        ) : null}
-                                    </div>
-                                </button>
-                            );
-                        })
+                                            <div className="flex items-center justify-between gap-2 pl-5">
+                                                <div className="w-24 h-1 rounded-full bg-muted overflow-hidden">
+                                                    <div
+                                                        className={cn(
+                                                            'h-full rounded-full',
+                                                            pct > 30 ? 'bg-emerald-500' : pct > 10 ? 'bg-amber-500' : 'bg-rose-500'
+                                                        )}
+                                                        style={{ width: `${pct}%` }}
+                                                    />
+                                                </div>
+                                                {countdown ? (
+                                                    <span className="text-[9px] text-muted-foreground inline-flex items-center gap-0.5 shrink-0">
+                                                        <Clock className="h-2.5 w-2.5" /> {countdown}
+                                                    </span>
+                                                ) : fam.supportsThinking ? (
+                                                    <span className="text-[9px] text-muted-foreground/75 shrink-0">支持调节思考程度</span>
+                                                ) : null}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ))
                     )}
                 </div>
             )}

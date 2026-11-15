@@ -22,6 +22,7 @@ const {
     listOAuthAccounts,
     getActiveAccountQuotaSummary,
     classifyAccountTier,
+    isInternalOrNoiseModel,
 } = require('../oauth-accounts');
 
 // Private helper — clear all step cache
@@ -30,42 +31,61 @@ function clearCache() {
     return cleanupAll();
 }
 
-function matchCloudCodeQuota(modelSlug, rawModelsMap) {
+function matchCloudCodeEntry(modelSlug, rawModelsMap) {
     if (!rawModelsMap || typeof rawModelsMap !== 'object' || !modelSlug) return null;
     const lower = String(modelSlug).toLowerCase();
-    if (rawModelsMap[lower]?.quotaInfo) return rawModelsMap[lower].quotaInfo;
-    if (lower.startsWith('gemini-3.8-flash') && rawModelsMap['gemini-3.8-flash-tiered']?.quotaInfo) {
-        return rawModelsMap['gemini-3.8-flash-tiered'].quotaInfo;
-    }
-    if (lower.startsWith('gemini-4-argon') && rawModelsMap['gemini-4-argon']?.quotaInfo) {
-        return rawModelsMap['gemini-4-argon'].quotaInfo;
-    }
-    if (lower.startsWith('gemini-4-hydrogen') && rawModelsMap['gemini-4-hydrogen']?.quotaInfo) {
-        return rawModelsMap['gemini-4-hydrogen'].quotaInfo;
+    if (rawModelsMap[lower]) return rawModelsMap[lower];
+    const base = lower.replace(/-(low|medium|high|xhigh|max|thinking)$/i, '');
+    const candidates = [base, `${base}-tiered`, `${base}-thinking`, `${base}-medium`];
+    for (const key of candidates) {
+        if (rawModelsMap[key]) return rawModelsMap[key];
     }
     return null;
+}
+
+function matchCloudCodeQuota(modelSlug, rawModelsMap) {
+    return matchCloudCodeEntry(modelSlug, rawModelsMap)?.quotaInfo || null;
+}
+
+function classifyModelCategory(m) {
+    const hay = `${m.label || ''} ${m.modelId || ''}`.toLowerCase();
+    if (hay.includes('claude')) return 'Claude';
+    if (hay.includes('gemini') || hay.includes('orchestrator') || hay.includes('argon') || hay.includes('hydrogen')) return 'Gemini';
+    if (hay.includes('gpt') || hay.includes('openai')) return 'GPT / OpenAI';
+    return '其他模型';
+}
+
+function groupModelsByCategory(sourceModels) {
+    const buckets = new Map();
+    for (const m of sourceModels) {
+        const cat = classifyModelCategory(m);
+        if (!buckets.has(cat)) buckets.set(cat, []);
+        buckets.get(cat).push(m);
+    }
+    return Array.from(buckets.entries()).map(([name, models]) => ({ name, models }));
 }
 
 function buildCliFallbackModels(agyModels, activeSummary) {
     const rawMap = activeSummary?.rawModelsMap || {};
     const sourceModels = Array.isArray(agyModels) && agyModels.length > 0
         ? agyModels.map((m) => {
-            const qi = matchCloudCodeQuota(m.id, rawMap);
+            const entry = matchCloudCodeEntry(m.id, rawMap);
+            const qi = entry?.quotaInfo || null;
             return {
-                label: m.label,
+                label: m.label || entry?.displayName || m.id,
                 modelId: m.id,
                 cliModelId: m.id,
-                supportsImages: true,
-                isRecommended: /gemini-4-argon-medium|gemini-3\.8-flash-medium|claude-sonnet/i.test(m.id),
+                supportsImages: entry ? Boolean(entry.supportsImages) : true,
+                isRecommended: Boolean(entry?.recommended),
                 isBeta: false,
-                tagTitle: '',
-                tagDescription: '',
+                tagTitle: entry?.tagTitle || '',
+                tagDescription: entry?.tagDescription || '',
                 quota: typeof qi?.remainingFraction === 'number' ? qi.remainingFraction : 1,
                 resetTime: qi?.resetTime || null,
             };
         })
         : (activeSummary?.models || [])
-            .filter((m) => !/^gemini-(2\.5|3-flash|3\.1)/i.test(m.modelId) && !/-image$/i.test(m.modelId))
+            .filter((m) => !isInternalOrNoiseModel(m.modelId, m) && !/-image$/i.test(m.modelId))
             .map((m) => ({
                 label: m.displayName || m.modelId,
                 modelId: m.modelId,
@@ -73,13 +93,13 @@ function buildCliFallbackModels(agyModels, activeSummary) {
                 supportsImages: !!m.supportsImages,
                 isRecommended: !!m.recommended,
                 isBeta: false,
-                tagTitle: '',
-                tagDescription: '',
+                tagTitle: m.tagTitle || '',
+                tagDescription: m.tagDescription || '',
                 quota: typeof m.remainingFraction === 'number' ? m.remainingFraction : 1,
                 resetTime: m.resetTime || null,
             }));
 
-    const groups = sourceModels.length ? [{ name: 'Models', models: sourceModels }] : [];
+    const groups = groupModelsByCategory(sourceModels);
     const recommended = sourceModels.find((m) => m.isRecommended) || sourceModels[0];
     return {
         models: sourceModels,

@@ -458,6 +458,7 @@ export interface OAuthAccountMeta {
     hasRefreshToken: boolean;
     hasAccessToken: boolean;
     isActive: boolean;
+    quota?: OAuthAccountQuota | null;
 }
 
 export interface OAuthListResponse {

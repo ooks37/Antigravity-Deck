@@ -449,7 +449,7 @@ function listOAuthAccounts(opts = {}) {
     const enriched = accounts.map((acc) => {
         const isActive = Boolean(activeLower && acc.email && acc.email.toLowerCase() === activeLower);
         if (isActive && !activeAlias) activeAlias = acc.alias;
-        const cachedQuota = quotaCache.get(acc.alias) || null;
+        const cachedQuota = formatCachedQuota(quotaCache.get(acc.alias) || null, false);
         return { ...acc, isActive, quota: cachedQuota };
     });
     return {
@@ -1240,6 +1240,7 @@ module.exports = {
     fetchAccountQuota,
     getActiveAccountQuotaSummary,
     classifyAccountTier,
+    isInternalOrNoiseModel,
     rotateOAuthAccount,
     startWebOAuthFlow,
     completeWebOAuthFlow,

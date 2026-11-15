@@ -152,6 +152,7 @@ function createAgyManager(deps = {}) {
     const readCliSteps = deps.readCliConversationSteps || readCliConversationSteps;
     const existsSync = deps.existsSync || fs.existsSync;
     const statSync = deps.statSync || fs.statSync;
+    const readFileSync = deps.readFileSync || fs.readFileSync;
     const getAppSettings = deps.getSettings || getSettings;
     const env = deps.env || process.env;
     const platformName = deps.platform || process.platform;
@@ -163,8 +164,31 @@ function createAgyManager(deps = {}) {
     let cachedStatus = null;
     let cachedModels = null;
     let cachedModelsAt = 0;
+    let cachedModelsKey = '';
     let modelsEpoch = 0;
     let modelsRefreshPromise = null;
+
+    function getCredentialStamp() {
+        try {
+            const geminiDir = path.join(homeDir || os.homedir(), '.gemini');
+            const gaPath = path.join(geminiDir, 'google_accounts.json');
+            const ocPath = path.join(geminiDir, 'oauth_creds.json');
+            let active = '';
+            try {
+                if (existsSync(gaPath)) {
+                    const ga = JSON.parse(readFileSync(gaPath, 'utf8'));
+                    active = String(ga?.active || '');
+                }
+            } catch { /* ignore */ }
+            let ocMtime = 0;
+            try {
+                if (existsSync(ocPath)) ocMtime = statSync(ocPath).mtimeMs || 0;
+            } catch { /* ignore */ }
+            return `${active}:${ocMtime}`;
+        } catch {
+            return '';
+        }
+    }
 
     function isExecutableFile(filePath) {
         if (!filePath || typeof filePath !== 'string' || filePath.includes('\0')) return false;
@@ -419,6 +443,7 @@ function createAgyManager(deps = {}) {
     function invalidateModelsCache() {
         cachedModels = null;
         cachedModelsAt = 0;
+        cachedModelsKey = '';
         modelsEpoch += 1;
         modelsRefreshPromise = null;
     }
@@ -540,6 +565,7 @@ function createAgyManager(deps = {}) {
     async function refreshAgyModelsLocked() {
         if (modelsRefreshPromise) return modelsRefreshPromise;
         const epochAtStart = modelsEpoch;
+        const stampAtStart = getCredentialStamp();
         modelsRefreshPromise = (async () => {
             const binary = await findAgyBinary();
             if (!binary.found) {
@@ -552,6 +578,7 @@ function createAgyManager(deps = {}) {
                 if (epochAtStart === modelsEpoch) {
                     cachedModels = { raw, models };
                     cachedModelsAt = Date.now();
+                    cachedModelsKey = stampAtStart;
                 }
                 return { statusCode: 200, success: true, raw, models };
             } catch (err) {
@@ -567,7 +594,9 @@ function createAgyManager(deps = {}) {
 
     async function getAgyModels({ force = false } = {}) {
         const ageMs = Date.now() - cachedModelsAt;
-        if (!force && cachedModels) {
+        const currentStamp = getCredentialStamp();
+        const sameCreds = !cachedModelsKey || cachedModelsKey === currentStamp;
+        if (!force && cachedModels && sameCreds) {
             // Fresh within 5 min; stale-while-revalidate up to 12 hours so /api/models never blocks
             if (ageMs < 300000) {
                 return { statusCode: 200, success: true, ...cachedModels };
