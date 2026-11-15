@@ -6,6 +6,7 @@ const { getAutoAccept, setAutoAccept, buildAcceptPayload } = require('../cache')
 const { startCascade, sendMessage } = require('../cascade'); // startAndSend is NOT used — intentionally omitted
 const { registerCascadeInstance } = require('../poller');
 const { resolveInst } = require('./route-helpers');
+const { handleLsFallback } = require('../ls-fallback');
 const userManager = require('../user-manager');
 
 // Security: Method whitelist to prevent arbitrary LS method invocation.
@@ -411,8 +412,13 @@ module.exports = function setupCascadeRoutes(app) {
             }
             
             const inst = resolveInst(req);
+            if (!inst) {
+                const fallback = await handleLsFallback(method, req.body || {});
+                if (fallback !== null) return res.json(fallback);
+                return res.status(503).json({ error: 'No language server connected' });
+            }
             const result = await callApi(method, req.body || {}, inst);
             res.json(result);
-        } catch (e) { res.status(500).json({ error: e.message }); }
+        } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
     });
 };

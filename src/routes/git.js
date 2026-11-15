@@ -2,11 +2,12 @@
 // /api/workspaces/:name/git/*, /api/workspaces/:name/file/read, /api/workspaces/:name/fs/list
 
 const { getInstanceByName } = require('../detector');
+const { resolveWorkspacePathByName } = require('../ls-fallback');
 const { execGitSafe, validateGitPath, uriToFsPath } = require('./route-helpers');
 
 // Resolve a workspace name to a filesystem cwd. Tracked hub workspaces win;
-// otherwise fall back to Jetbox projects (name -> folderUri), so Source Control
-// works for IDE projects that aren't tracked on the hub.
+// otherwise fall back to Jetbox projects (name -> folderUri), then local disk
+// workspace discovery so Source Control works in headless CLI mode too.
 function resolveWorkspaceCwd(rawName) {
     const name = decodeURIComponent(String(rawName || ''));
     const inst = getInstanceByName(name);
@@ -17,7 +18,11 @@ function resolveWorkspaceCwd(rawName) {
     const target = name.toLowerCase();
     const project = require('../jetbox').getProjects()
         .find(p => p.name && p.name.toLowerCase() === target);
-    return project ? uriToFsPath(project.folderUri) : null;
+    if (project) {
+        const cwd = uriToFsPath(project.folderUri);
+        if (cwd) return cwd;
+    }
+    return resolveWorkspacePathByName(name);
 }
 
 module.exports = function setupGitRoutes(app) {
