@@ -488,7 +488,8 @@ function createAgyManager(deps = {}) {
         if (resolvedModel) {
             args.push('--model', resolvedModel);
         }
-        if (cleanEffort) {
+        const resolvedSuffix = resolvedModel ? (resolvedModel.match(/-(low|medium|high|xhigh|max)$/i)?.[1]?.toLowerCase() || null) : null;
+        if (cleanEffort && (!resolvedSuffix || resolvedSuffix === cleanEffort)) {
             args.push('--effort', cleanEffort);
         }
         const cleanConvId = (conversationId && typeof conversationId === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(conversationId.trim()))

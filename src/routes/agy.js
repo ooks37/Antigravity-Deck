@@ -104,10 +104,14 @@ module.exports = function setupAgyRoutes(app) {
             if (closed || res.writableEnded) return;
             res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         };
+        res.write(': stream-open\n\n');
 
-        req.on('close', () => {
-            closed = true;
-            if (typeof cancelChild === 'function') cancelChild();
+        // Use res 'close' (not req 'close', which fires as soon as express.json() reads the POST body)
+        res.on('close', () => {
+            if (!res.writableFinished) {
+                closed = true;
+                if (typeof cancelChild === 'function') cancelChild();
+            }
         });
 
         try {
@@ -158,7 +162,7 @@ module.exports = function setupAgyRoutes(app) {
         } catch (e) {
             sendEvent('error', { error: e.message || '执行异常' });
         } finally {
-            if (!closed && !res.writableEnded) res.end();
+            if (!res.writableEnded) res.end();
         }
     });
 };
