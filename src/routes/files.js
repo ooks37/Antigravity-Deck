@@ -4,8 +4,34 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const express = require('express');
 const { callApi } = require('../api');
 const { uriToFsPath, resolveInst } = require('./route-helpers');
+
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+function resolveUploadTargetDir(workspaceHint) {
+    const { lsInstances } = require('../config');
+    let rootDir = null;
+    if (workspaceHint && typeof workspaceHint === 'string') {
+        const clean = workspaceHint.trim();
+        const matched = lsInstances.find((i) =>
+            i.workspaceName === clean
+            || i.workspaceFolderUri === clean
+            || uriToFsPath(i.workspaceFolderUri) === clean);
+        if (matched) {
+            rootDir = uriToFsPath(matched.workspaceFolderUri);
+        }
+    }
+    if (!rootDir && lsInstances.length > 0) {
+        rootDir = uriToFsPath(lsInstances[0].workspaceFolderUri);
+    }
+    if (rootDir && fs.existsSync(rootDir)) {
+        return { baseDir: rootDir, uploadDir: path.join(rootDir, '.antigravity-uploads') };
+    }
+    const fallback = path.join(os.homedir(), '.gemini', 'antigravity-deck', 'uploads');
+    return { baseDir: null, uploadDir: fallback };
+}
 
 module.exports = function setupFilesRoutes(app) {
     // GET /api/file/read — for rendering artifacts like .md files
@@ -296,6 +322,55 @@ module.exports = function setupFilesRoutes(app) {
             fs.createReadStream(realPath).pipe(res);
         } catch (e) {
             res.status(500).json({ error: 'Failed to serve file' });
+        }
+    });
+
+    // POST /api/files/upload — upload arbitrary log/config/script/document files up to 15MB
+    app.post('/api/files/upload', express.json({ limit: '25mb' }), (req, res) => {
+        try {
+            const { name, contentBase64, contentText, workspace, mimeType } = req.body || {};
+            if (!name || typeof name !== 'string') {
+                return res.status(400).json({ error: '缺少文件名 name' });
+            }
+            let buf;
+            if (typeof contentBase64 === 'string' && contentBase64.length > 0) {
+                const rawB64 = contentBase64.replace(/^data:[^;]+;base64,/, '');
+                buf = Buffer.from(rawB64, 'base64');
+            } else if (typeof contentText === 'string') {
+                buf = Buffer.from(contentText, 'utf8');
+            } else {
+                return res.status(400).json({ error: '缺少文件内容 contentBase64 或 contentText' });
+            }
+
+            if (buf.length > MAX_UPLOAD_BYTES) {
+                return res.status(413).json({ error: `文件过大，最大支持 ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))}MB` });
+            }
+
+            const originalBase = path.basename(name).trim() || 'upload.bin';
+            const cleanBase = originalBase.replace(/[^\w.\-()\u4e00-\u9fa5]/g, '_').slice(0, 120) || 'upload.bin';
+            const finalName = `${Date.now()}-${cleanBase}`;
+            const { baseDir, uploadDir } = resolveUploadTargetDir(workspace);
+            fs.mkdirSync(uploadDir, { recursive: true });
+
+            const targetPath = path.resolve(uploadDir, finalName);
+            const resolvedUploadDir = path.resolve(uploadDir);
+            if (!targetPath.startsWith(resolvedUploadDir + path.sep)) {
+                return res.status(403).json({ error: '非法文件路径' });
+            }
+
+            fs.writeFileSync(targetPath, buf);
+            const relativePath = baseDir ? path.relative(baseDir, targetPath).replace(/\\/g, '/') : targetPath;
+            res.json({
+                success: true,
+                name: finalName,
+                originalName: originalBase,
+                path: targetPath,
+                relativePath,
+                size: buf.length,
+                mimeType: mimeType || 'application/octet-stream',
+            });
+        } catch (e) {
+            res.status(500).json({ error: e.message || '上传文件失败' });
         }
     });
 };

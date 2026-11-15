@@ -457,6 +457,179 @@ async function apiJson<T>(url: string, init?: RequestInit, fallbackErr = '请求
     return data as T;
 }
 
+export interface FleetServer {
+    id: string;
+    name: string;
+    ip: string;
+    host: string;
+    port: number | null;
+    hostname: string;
+    region: string;
+    isp: string;
+    os: string;
+    kernel: string;
+    cpuModel: string;
+    cores: number | null;
+    ramGb: number | null;
+    diskGb: number | null;
+    combo: string;
+    tags: string[];
+    description: string;
+    isActive: boolean;
+    configured: boolean;
+    online?: boolean;
+    authOk?: boolean;
+    statusCode?: number | null;
+    latencyMs?: number | null;
+    error?: string | null;
+    checkedAt?: string;
+}
+
+export interface FleetResponse {
+    exists: boolean;
+    configPath: string;
+    activeServer: string | null;
+    count: number;
+    onlineCount?: number;
+    servers: FleetServer[];
+    error?: string;
+}
+
+export interface OAuthAccountQuota {
+    alias: string;
+    email: string | null;
+    fetchedAt?: string;
+    avgQuota?: number | null;
+    minQuota?: number | null;
+    exhaustedCount?: number;
+    totalModels?: number;
+    models?: Array<{
+        modelId: string;
+        displayName: string;
+        remainingFraction: number | null;
+        resetTime: string | null;
+    }>;
+    error?: string;
+}
+
+export interface UploadedFileResult {
+    success: boolean;
+    name: string;
+    originalName: string;
+    path: string;
+    relativePath: string;
+    size: number;
+    mimeType: string;
+}
+
+export async function getAuthInfo(): Promise<{ authEnabled: boolean; keyLength: number }> {
+    return apiJson(`${API_BASE}/api/auth/info`, undefined, '获取访问认证信息失败');
+}
+
+export async function changeAuthPassword(payload: { currentKey?: string; newKey: string }): Promise<{ updated: boolean; keyLength: number }> {
+    return apiJson(`${API_BASE}/api/auth/password`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '修改访问密码失败');
+}
+
+export async function getFleetServers(): Promise<FleetResponse> {
+    return apiJson(`${API_BASE}/api/fleet/servers`, undefined, '获取服务器列表失败');
+}
+
+export async function pingFleetServers(timeoutMs = 3500): Promise<FleetResponse> {
+    return apiJson(`${API_BASE}/api/fleet/ping`, {
+        method: 'POST',
+        body: JSON.stringify({ timeoutMs }),
+    }, '检测服务器连通性失败');
+}
+
+export async function uploadWorkspaceFile(payload: {
+    name: string;
+    contentBase64?: string;
+    contentText?: string;
+    workspace?: string;
+    mimeType?: string;
+}): Promise<UploadedFileResult> {
+    return apiJson(`${API_BASE}/api/files/upload`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '上传文件失败');
+}
+
+export async function switchOAuthAccount(
+    target: string,
+    opts?: { reloadHub?: boolean; refreshIfExpired?: boolean },
+): Promise<{
+    success: boolean;
+    alias: string;
+    email: string | null;
+    name: string | null;
+    oauthSynced: boolean;
+    credManSynced: boolean;
+    headlessTokenSynced?: boolean;
+    tokenRefreshed?: boolean;
+    hubReloaded?: boolean;
+}> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/use`, {
+        method: 'POST',
+        body: JSON.stringify({
+            target,
+            reloadHub: opts?.reloadHub ?? true,
+            refreshIfExpired: opts?.refreshIfExpired ?? true,
+        }),
+    }, '切换 OAuth 账号失败');
+}
+
+export async function getOAuthQuotas(alias?: string): Promise<OAuthAccountQuota | { activeAlias: string | null; accounts: OAuthAccountQuota[] }> {
+    const q = alias ? `?alias=${encodeURIComponent(alias)}` : '';
+    return apiJson(`${API_BASE}/api/accounts/oauth/quota${q}`, undefined, '获取账号配额失败');
+}
+
+export async function rotateOAuthAccount(reloadHub = true): Promise<{
+    rotated: boolean;
+    previousAlias: string | null;
+    alias: string;
+    email: string | null;
+    hubReloaded?: boolean;
+}> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/rotate`, {
+        method: 'POST',
+        body: JSON.stringify({ reloadHub }),
+    }, '轮转切换账号失败');
+}
+
+export async function startOAuthLoginUrl(redirectUri?: string): Promise<{ authUrl: string; redirectUri: string; state: string }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/login-url`, {
+        method: 'POST',
+        body: JSON.stringify(redirectUri ? { redirectUri } : {}),
+    }, '生成 Google 登录链接失败');
+}
+
+export async function completeOAuthCallback(payload: {
+    callbackUrl?: string;
+    code?: string;
+    state?: string;
+    alias?: string;
+    activate?: boolean;
+}): Promise<{ success: boolean; alias: string; email: string | null }> {
+    return apiJson(`${API_BASE}/api/accounts/oauth/callback`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '完成 Google OAuth 登录失败');
+}
+
+export async function runAgyQuick(payload: {
+    prompt: string;
+    model?: string;
+    workspace?: string;
+}): Promise<{ success: boolean; text?: string; sessionId?: string | null; error?: string }> {
+    return apiJson(`${API_BASE}/api/agy/run`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }, '调用 agy 执行失败');
+}
+
 export async function getProfiles(): Promise<ProfileListResponse> {
     return apiJson<ProfileListResponse>(`${API_BASE}/api/profiles`, undefined, '获取账号档案失败');
 }
@@ -724,6 +897,7 @@ export interface CliPermissionsConfig {
 
 export interface PermissionConfigState {
     autoAccept: boolean;
+    autoAcceptPolicy?: 'smart' | 'full';
     settingsPath: string;
     fileExists: boolean;
     parseError: string | null;
@@ -747,6 +921,7 @@ export async function getPermissionsConfig(): Promise<PermissionConfigState> {
 
 export async function updatePermissionsConfig(payload: {
     autoAccept?: boolean;
+    autoAcceptPolicy?: 'smart' | 'full';
     cli?: Partial<CliPermissionsConfig>;
 }): Promise<PermissionConfigState> {
     return apiJson<PermissionConfigState>(`${API_BASE}/api/permissions`, {

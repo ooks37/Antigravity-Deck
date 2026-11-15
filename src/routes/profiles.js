@@ -22,6 +22,10 @@ const {
     importOAuthAccount,
     renameOAuthAccount,
     deleteOAuthAccount,
+    fetchAccountQuota,
+    rotateOAuthAccount,
+    startWebOAuthFlow,
+    completeWebOAuthFlow,
 } = require('../oauth-accounts');
 const { callApi } = require('../api');
 const { getFirstActiveInstance } = require('../detector');
@@ -206,14 +210,67 @@ module.exports = function setupProfilesRoutes(app) {
     });
 
     app.post('/api/accounts/oauth/use', async (req, res) => {
-        const { target } = req.body || {};
+        const { target, reloadHub, refreshIfExpired } = req.body || {};
         if (!target) return res.status(400).json({ error: '缺少 target 参数' });
         try {
-            const result = await useOAuthAccount(target);
+            const result = await useOAuthAccount(target, {
+                reloadHub: reloadHub !== false,
+                refreshIfExpired: refreshIfExpired !== false,
+            });
             res.json(result);
         } catch (e) {
             const status = e.message.includes('未找到') ? 404 : 400;
             res.status(status).json({ error: e.message });
+        }
+    });
+
+    app.get('/api/accounts/oauth/quota', async (req, res) => {
+        const alias = req.query?.alias ? String(req.query.alias) : '';
+        try {
+            if (alias) {
+                const quota = await fetchAccountQuota(alias);
+                return res.json(quota);
+            }
+            const overview = listOAuthAccounts();
+            const entries = await Promise.all((overview.accounts || []).map(async (acc) => {
+                try {
+                    return await fetchAccountQuota(acc.alias);
+                } catch (e) {
+                    return { alias: acc.alias, email: acc.email || null, error: e.message };
+                }
+            }));
+            res.json({ activeAlias: overview.activeAlias, accounts: entries });
+        } catch (e) {
+            const status = e.message.includes('未找到') ? 404 : 400;
+            res.status(status).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/accounts/oauth/rotate', async (req, res) => {
+        try {
+            const result = await rotateOAuthAccount({ reloadHub: req.body?.reloadHub !== false });
+            res.json(result);
+        } catch (e) {
+            res.status(400).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/accounts/oauth/login-url', (req, res) => {
+        try {
+            const { redirectUri } = req.body || {};
+            res.json(startWebOAuthFlow({ redirectUri }));
+        } catch (e) {
+            res.status(400).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/accounts/oauth/callback', async (req, res) => {
+        try {
+            const { callbackUrl, code, state, alias, activate } = req.body || {};
+            const result = await completeWebOAuthFlow({ callbackUrl, code, state, alias, activate: activate !== false });
+            res.json(result);
+        } catch (e) {
+            res.status(400).json({ error: e.message });
         }
     });
 

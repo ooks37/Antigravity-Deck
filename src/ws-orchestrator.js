@@ -14,6 +14,7 @@
 
 const crypto = require('crypto');
 const orchestratorManager = require('./orchestrator-manager');
+const { getEffectiveAuthKey, verifyAuthKey } = require('./auth-manager');
 
 /**
  * Set up the orchestrator WebSocket server.
@@ -24,14 +25,13 @@ function setupOrchestratorWebSocket(wss) {
 
     wss.on('connection', (ws, req) => {
         // Auth check (same pattern as ws-agent.js)
-        const authKey = process.env.AUTH_KEY || '';
-        if (authKey) {
+        if (getEffectiveAuthKey()) {
             const ip = req.socket.remoteAddress || '';
             const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
             if (!isLocal) {
                 const url = new URL(req.url, 'http://localhost');
-                const key = url.searchParams.get('auth_key');
-                if (key !== authKey) {
+                const key = url.searchParams.get('auth_key') || '';
+                if (!verifyAuthKey(key)) {
                     ws.close(4401, 'Unauthorized');
                     return;
                 }

@@ -13,17 +13,17 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
-  themeColor: '#09090b', // matches dark background
+  themeColor: '#f7f8fa', // matches light Doubao canvas by default
 };
 
 export const metadata: Metadata = {
-  title: "Antigravity Deck",
-  description: "Antigravity 实时对话镜像与工作区控制台",
+  title: "Antigravity 云端工作台",
+  description: "基于 Antigravity 与 agy 的多机协同、多账号与多模型 AI 远程控制工作台",
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'Antigravity Deck',
+    statusBarStyle: 'default',
+    title: 'Antigravity 工作台',
   },
   other: {
     'mobile-web-app-capable': 'yes',
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN" className="dark">
+    <html lang="zh-CN" suppressHydrationWarning>
       <body suppressHydrationWarning className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <SidebarProvider>
           <TooltipProvider delayDuration={200}>

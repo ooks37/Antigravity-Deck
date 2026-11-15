@@ -6,7 +6,7 @@ export function useTheme() {
 
     useEffect(() => {
         const saved = localStorage.getItem('antigravity-theme');
-        const dark = saved ? saved === 'dark' : true;
+        const dark = saved === 'dark';
         setIsDark(dark);
         document.documentElement.classList.toggle('dark', dark);
     }, []);

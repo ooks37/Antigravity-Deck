@@ -9,6 +9,7 @@ import { Check, X, Sparkles, CircleDot, Bot, Settings, Globe, Camera, Star, Bell
 import { Switch } from '@/components/ui/switch';
 import { ProxyPanel } from './proxy-panel';
 import { PermissionsPanel } from './permissions-panel';
+import { SecurityPanel } from './security-panel';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -569,6 +570,9 @@ export function SettingsView() {
                         </p>
                     </CardContent>
                 </Card>
+
+                {/* Security & Password / Mobile Direct Link */}
+                <SecurityPanel />
 
                 {/* Agent Permissions & Persistent Service */}
                 <PermissionsPanel />

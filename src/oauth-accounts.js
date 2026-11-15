@@ -5,11 +5,21 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const https = require('https');
 const { spawn } = require('child_process');
 
 const PS_PATH = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const DEFAULT_SCOPE = 'openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
 const ALIAS_PATTERN = /^[a-zA-Z0-9_\u4e00-\u9fa5-]+$/;
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v1/userinfo';
+const CLOUDCODE_MODELS_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels';
+const DEFAULT_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
+
+const pendingOAuthFlows = new Map(); // state -> { codeVerifier, redirectUri, createdAt }
+const quotaCache = new Map(); // alias -> { fetchedAt, ... }
 
 function resolvePaths(opts = {}) {
     const homeDir = opts.homeDir || os.homedir();
@@ -18,7 +28,20 @@ function resolvePaths(opts = {}) {
     const altAccountsDir = opts.altAccountsDir || path.join(geminiDir, 'antigravity-cli', 'plugin_data', 'agy-accounts');
     const oauthCredsPath = path.join(geminiDir, 'oauth_creds.json');
     const googleAccountsPath = path.join(geminiDir, 'google_accounts.json');
-    return { homeDir, geminiDir, accountsDir, altAccountsDir, oauthCredsPath, googleAccountsPath };
+    const cliTokenPath = path.join(geminiDir, 'antigravity-cli', 'antigravity-oauth-token');
+    const jetskiTokenPath = path.join(geminiDir, 'jetski-standalone-oauth-token');
+    const ideTokenPath = path.join(geminiDir, 'antigravity', 'antigravity-oauth-token');
+    return {
+        homeDir,
+        geminiDir,
+        accountsDir,
+        altAccountsDir,
+        oauthCredsPath,
+        googleAccountsPath,
+        cliTokenPath,
+        jetskiTokenPath,
+        ideTokenPath,
+    };
 }
 
 function validateAlias(alias) {
@@ -384,14 +407,32 @@ function getCurrentOAuthStatusSync(opts = {}) {
     const paths = resolvePaths(opts);
     const oauthData = readJsonSafe(paths.oauthCredsPath);
     const googleAccounts = readJsonSafe(paths.googleAccountsPath);
+    const candidateFiles = [
+        oauthData,
+        readJsonSafe(paths.jetskiTokenPath),
+        readJsonSafe(paths.cliTokenPath),
+        readJsonSafe(paths.ideTokenPath),
+    ].filter(Boolean);
+
+    const parsedMetas = candidateFiles.map((d) => extractAccountMeta(d)).filter((m) => m.hasAccessToken || m.hasRefreshToken);
     const oauthMeta = oauthData ? extractAccountMeta(oauthData) : null;
-    const activeEmail = oauthMeta?.email || googleAccounts?.active || null;
+    const activeEmail = oauthMeta?.email || googleAccounts?.active || parsedMetas[0]?.email || null;
+
+    // Pick freshest expiry among matching email credentials (agy CLI / LS auto-refreshes standalone token files)
+    let bestMeta = oauthMeta;
+    for (const m of parsedMetas) {
+        if (activeEmail && m.email && m.email.toLowerCase() !== activeEmail.toLowerCase()) continue;
+        if (!bestMeta || (!bestMeta.expiry && m.expiry) || (m.expiry && bestMeta.expiry && Date.parse(m.expiry) > Date.parse(bestMeta.expiry))) {
+            bestMeta = m;
+        }
+    }
+
     return {
-        hasCurrentCreds: Boolean(oauthData && (oauthMeta?.hasAccessToken || oauthMeta?.hasRefreshToken)),
+        hasCurrentCreds: Boolean(parsedMetas.length > 0),
         activeEmail,
-        activeName: oauthMeta?.name || null,
-        expiry: oauthMeta?.expiry || null,
-        isExpired: oauthMeta?.isExpired || false,
+        activeName: bestMeta?.name || oauthMeta?.name || null,
+        expiry: bestMeta?.expiry || oauthMeta?.expiry || null,
+        isExpired: bestMeta ? bestMeta.isExpired : false,
         oauthCredsExists: fs.existsSync(paths.oauthCredsPath),
         accountsDirExists: fs.existsSync(paths.accountsDir),
     };
@@ -406,7 +447,8 @@ function listOAuthAccounts(opts = {}) {
     const enriched = accounts.map((acc) => {
         const isActive = Boolean(activeLower && acc.email && acc.email.toLowerCase() === activeLower);
         if (isActive && !activeAlias) activeAlias = acc.alias;
-        return { ...acc, isActive };
+        const cachedQuota = quotaCache.get(acc.alias) || null;
+        return { ...acc, isActive, quota: cachedQuota };
     });
     return {
         ...status,
@@ -431,9 +473,141 @@ async function readActiveCredentialObject(opts = {}) {
         const winCred = await reader();
         if (winCred) return winCred;
     }
-    const fileCred = readJsonSafe(paths.oauthCredsPath);
-    if (fileCred) return fileCred;
+    for (const filePath of [paths.jetskiTokenPath, paths.cliTokenPath, paths.ideTokenPath, paths.oauthCredsPath]) {
+        const fileCred = readJsonSafe(filePath);
+        if (fileCred) return fileCred;
+    }
     return null;
+}
+
+function discoverOAuthClientConfig(opts = {}) {
+    if (opts.oauthConfig?.clientId && opts.oauthConfig?.clientSecret) {
+        return opts.oauthConfig;
+    }
+    if (process.env.AG_OAUTH_CLIENT_ID && process.env.AG_OAUTH_CLIENT_SECRET) {
+        return {
+            clientId: process.env.AG_OAUTH_CLIENT_ID.trim(),
+            clientSecret: process.env.AG_OAUTH_CLIENT_SECRET.trim(),
+        };
+    }
+    try {
+        const { getSettings } = require('./config');
+        const settings = getSettings() || {};
+        if (settings.oauthClientId && settings.oauthClientSecret) {
+            return {
+                clientId: String(settings.oauthClientId).trim(),
+                clientSecret: String(settings.oauthClientSecret).trim(),
+            };
+        }
+    } catch { /* ignore in isolated tests */ }
+
+    // Best-effort discovery from local 9router/provider registry on VPS if present
+    const localRegistryPaths = [
+        '/www/wwwroot/9router/app/open-sse/providers/registry/antigravity.js',
+    ];
+    for (const regPath of localRegistryPaths) {
+        try {
+            if (!fs.existsSync(regPath)) continue;
+            const text = fs.readFileSync(regPath, 'utf8');
+            const idMatch = text.match(/clientId\s*:\s*['"]([^'"]+\.apps\.googleusercontent\.com)['"]/);
+            const secMatch = text.match(/clientSecret\s*:\s*['"]([^'"]+)['"]/);
+            if (idMatch && secMatch) {
+                return { clientId: idMatch[1], clientSecret: secMatch[1] };
+            }
+        } catch { /* ignore */ }
+    }
+    return null;
+}
+
+function httpsJsonRequest(urlString, { method = 'GET', headers = {}, body = null, timeoutMs = 15000 } = {}) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(urlString);
+        const req = https.request({
+            hostname: parsed.hostname,
+            port: parsed.port || 443,
+            path: `${parsed.pathname}${parsed.search}`,
+            method,
+            headers,
+            timeout: timeoutMs,
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end', () => {
+                const text = Buffer.concat(chunks).toString('utf8');
+                let json = null;
+                try { json = JSON.parse(text); } catch { /* ignore */ }
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve({ status: res.statusCode, data: json ?? text });
+                } else {
+                    const errMsg = json?.error_description || json?.error?.message || json?.error || `HTTP ${res.statusCode}`;
+                    const err = new Error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
+                    err.statusCode = res.statusCode;
+                    err.body = json || text;
+                    reject(err);
+                }
+            });
+        });
+        req.on('timeout', () => req.destroy(new Error('请求超时')));
+        req.on('error', reject);
+        if (body !== null) req.write(body);
+        req.end();
+    });
+}
+
+async function refreshCredentialObject(raw, opts = {}) {
+    const meta = extractAccountMeta(raw);
+    const nested = raw.token && typeof raw.token === 'object' ? raw.token : null;
+    const refreshToken = nested?.refresh_token || raw.refresh_token;
+    if (!refreshToken) return { data: raw, refreshed: false };
+
+    const cfg = discoverOAuthClientConfig(opts);
+    if (!cfg) return { data: raw, refreshed: false, reason: 'missing_oauth_client' };
+
+    const form = new URLSearchParams({
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+    }).toString();
+
+    const resp = await httpsJsonRequest(GOOGLE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+    });
+    const tok = resp.data || {};
+    if (!tok.access_token) return { data: raw, refreshed: false };
+
+    const expiresIn = Number(tok.expires_in) || 3599;
+    const expiryIso = new Date(Date.now() + expiresIn * 1000).toISOString();
+    const expiryMs = Date.now() + expiresIn * 1000;
+
+    if (nested) {
+        const updated = {
+            ...raw,
+            ...(tok.id_token ? { id_token: tok.id_token } : {}),
+            token: {
+                ...nested,
+                access_token: tok.access_token,
+                refresh_token: tok.refresh_token || refreshToken,
+                token_type: tok.token_type || nested.token_type || 'Bearer',
+                expiry: expiryIso,
+                expires_in: expiresIn,
+            },
+        };
+        return { data: updated, refreshed: true };
+    }
+
+    const updated = {
+        ...raw,
+        access_token: tok.access_token,
+        refresh_token: tok.refresh_token || refreshToken,
+        token_type: tok.token_type || raw.token_type || 'Bearer',
+        expiry_date: expiryMs,
+        ...(tok.id_token ? { id_token: tok.id_token } : {}),
+        ...(meta.email ? { email: meta.email, id_token_email: meta.email } : {}),
+    };
+    return { data: updated, refreshed: true };
 }
 
 async function saveCurrentOAuthAccount(aliasInput, { force = false } = {}, opts = {}) {
@@ -481,9 +655,23 @@ async function useOAuthAccount(targetAlias, opts = {}) {
     if (!found) {
         throw new Error(`未找到已保存的 OAuth 账号 "${targetAlias}"`);
     }
-    const raw = readJsonSafe(found.targetPath);
+    let raw = readJsonSafe(found.targetPath);
     normalizeCredentialData(raw);
-    const meta = extractAccountMeta(raw);
+    let meta = extractAccountMeta(raw);
+
+    // Optional live refresh before writing credentials (skipped in offline unit tests unless requested)
+    let tokenRefreshed = false;
+    if (opts.refreshIfExpired && meta.isExpired && meta.hasRefreshToken) {
+        try {
+            const refreshed = await refreshCredentialObject(raw, opts);
+            if (refreshed.refreshed) {
+                raw = refreshed.data;
+                meta = extractAccountMeta(raw);
+                tokenRefreshed = true;
+                writeSecretJsonFile(found.targetPath, raw);
+            }
+        } catch { /* non-fatal: still switch with refresh_token so agy/LS can refresh */ }
+    }
 
     const existingOAuth = readJsonSafe(paths.oauthCredsPath) || {};
     const nextOAuth = toOAuthCredsObject(raw, existingOAuth);
@@ -500,8 +688,10 @@ async function useOAuthAccount(targetAlias, opts = {}) {
         old: Array.from(oldSet),
     });
 
-    let credManSynced = false;
     const platform = opts.platform || process.platform;
+    let credManSynced = false;
+    let headlessTokenSynced = false;
+
     if (platform === 'win32' && opts.useCredMan !== false) {
         const writer = opts.writeWindowsCred || defaultWriteWindowsCred;
         try {
@@ -511,12 +701,37 @@ async function useOAuthAccount(targetAlias, opts = {}) {
         }
     }
 
+    // Write headless fallback credential files for agy CLI & standalone language_server on Linux/macOS
+    if (platform !== 'win32' && opts.syncHeadless !== false) {
+        const existingJetski = readJsonSafe(paths.jetskiTokenPath);
+        const credBlob = toCredManBlobObject(raw);
+        if (existingJetski?.writer_id && !credBlob.writer_id) {
+            credBlob.writer_id = existingJetski.writer_id;
+        }
+        writeSecretJsonFile(paths.cliTokenPath, credBlob);
+        writeSecretJsonFile(paths.jetskiTokenPath, credBlob);
+        writeSecretJsonFile(paths.ideTokenPath, credBlob);
+        headlessTokenSynced = true;
+    }
+
+    let hubReloaded = false;
+    if (opts.reloadHub) {
+        try {
+            const { hasPm2HubApp, restartManagedIde } = require('./ide-launcher');
+            if (await hasPm2HubApp()) {
+                await restartManagedIde();
+                hubReloaded = true;
+            }
+        } catch { /* non-fatal */ }
+    }
+
     try {
         const { broadcastAll } = require('./ws');
         broadcastAll({
             type: 'oauth_account_swapped',
             alias: found.cleanAlias,
             email: meta.email,
+            hubReloaded,
         });
     } catch { /* ws server may not be initialized in tests */ }
 
@@ -528,7 +743,238 @@ async function useOAuthAccount(targetAlias, opts = {}) {
         format: meta.format,
         oauthSynced: true,
         credManSynced,
+        headlessTokenSynced,
+        tokenRefreshed,
+        hubReloaded,
     };
+}
+
+async function fetchAccountQuota(alias, opts = {}) {
+    const paths = resolvePaths(opts);
+    const found = findAccountFile(paths, alias);
+    if (!found) {
+        throw new Error(`未找到已保存的 OAuth 账号 "${alias}"`);
+    }
+    let raw = readJsonSafe(found.targetPath);
+    normalizeCredentialData(raw);
+    let meta = extractAccountMeta(raw);
+
+    if (meta.isExpired || !meta.hasAccessToken) {
+        const refreshed = await refreshCredentialObject(raw, opts);
+        if (refreshed.refreshed) {
+            raw = refreshed.data;
+            meta = extractAccountMeta(raw);
+            writeSecretJsonFile(found.targetPath, raw);
+        }
+    }
+
+    const accessToken = raw.token?.access_token || raw.access_token;
+    if (!accessToken) {
+        throw new Error(`账号 "${alias}" 缺少可用 access_token`);
+    }
+
+    const resp = await httpsJsonRequest(CLOUDCODE_MODELS_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'antigravity/hub/2.24.0 linux/amd64',
+        },
+        body: JSON.stringify({}),
+        timeoutMs: 12000,
+    });
+
+    const modelsMap = resp.data?.models && typeof resp.data.models === 'object' ? resp.data.models : {};
+    const models = Object.entries(modelsMap).map(([id, info]) => {
+        const qi = info?.quotaInfo || {};
+        const frac = typeof qi.remainingFraction === 'number' ? qi.remainingFraction : null;
+        return {
+            modelId: id,
+            displayName: info?.displayName || id,
+            remainingFraction: frac,
+            resetTime: qi.resetTime || null,
+        };
+    });
+
+    const withQuota = models.filter((m) => typeof m.remainingFraction === 'number');
+    const avgQuota = withQuota.length
+        ? Math.round((withQuota.reduce((s, m) => s + m.remainingFraction, 0) / withQuota.length) * 100) / 100
+        : null;
+    const minQuota = withQuota.length
+        ? Math.min(...withQuota.map((m) => m.remainingFraction))
+        : null;
+    const exhaustedCount = withQuota.filter((m) => m.remainingFraction <= 0.01).length;
+
+    const summary = {
+        alias: found.cleanAlias,
+        email: meta.email,
+        fetchedAt: new Date().toISOString(),
+        avgQuota,
+        minQuota,
+        exhaustedCount,
+        totalModels: models.length,
+        models: models.slice(0, 24),
+    };
+    quotaCache.set(found.cleanAlias, summary);
+    return summary;
+}
+
+async function rotateOAuthAccount(opts = {}) {
+    const overview = listOAuthAccounts(opts);
+    const accounts = overview.accounts || [];
+    if (accounts.length < 2) {
+        throw new Error('已保存账号不足 2 个，无法自动轮转切换');
+    }
+    const currentIdx = accounts.findIndex((a) => a.isActive);
+    const ordered = currentIdx >= 0
+        ? [...accounts.slice(currentIdx + 1), ...accounts.slice(0, currentIdx)]
+        : accounts;
+
+    // Prefer an account whose cached quota is not exhausted and has a refresh token
+    const candidate = ordered.find((a) => {
+        const q = quotaCache.get(a.alias);
+        if (q && q.avgQuota !== null && q.avgQuota <= 0.02) return false;
+        return a.hasRefreshToken || !a.isExpired;
+    }) || ordered[0];
+
+    const switchResult = await useOAuthAccount(candidate.alias, {
+        ...opts,
+        refreshIfExpired: true,
+        reloadHub: opts.reloadHub !== false,
+    });
+    return { rotated: true, previousAlias: overview.activeAlias, ...switchResult };
+}
+
+function startWebOAuthFlow({ redirectUri } = {}, opts = {}) {
+    const cfg = discoverOAuthClientConfig(opts);
+    if (!cfg) {
+        throw new Error('未配置 Google OAuth 客户端凭据（可在环境变量 AG_OAUTH_CLIENT_ID / AG_OAUTH_CLIENT_SECRET 或 settings.json 中配置）');
+    }
+    const finalRedirect = (redirectUri && String(redirectUri).trim()) || DEFAULT_OAUTH_REDIRECT_URI;
+    const state = crypto.randomBytes(18).toString('hex');
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    // Prune flows older than 20 minutes
+    const cutoff = Date.now() - 20 * 60 * 1000;
+    for (const [k, v] of pendingOAuthFlows.entries()) {
+        if (v.createdAt < cutoff) pendingOAuthFlows.delete(k);
+    }
+
+    pendingOAuthFlows.set(state, {
+        codeVerifier,
+        redirectUri: finalRedirect,
+        createdAt: Date.now(),
+    });
+
+    const params = new URLSearchParams({
+        client_id: cfg.clientId,
+        redirect_uri: finalRedirect,
+        response_type: 'code',
+        scope: `${DEFAULT_SCOPE} https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs`,
+        access_type: 'offline',
+        prompt: 'consent',
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+    });
+
+    return {
+        authUrl: `${GOOGLE_AUTH_URL}?${params.toString()}`,
+        redirectUri: finalRedirect,
+        state,
+    };
+}
+
+async function completeWebOAuthFlow({ callbackUrl, code, state, alias, activate = true } = {}, opts = {}) {
+    const cfg = discoverOAuthClientConfig(opts);
+    if (!cfg) {
+        throw new Error('未配置 Google OAuth 客户端凭据');
+    }
+
+    let authCode = code ? String(code).trim() : '';
+    let authState = state ? String(state).trim() : '';
+
+    if (callbackUrl && String(callbackUrl).trim()) {
+        const rawInput = String(callbackUrl).trim();
+        let parsed;
+        try {
+            parsed = new URL(rawInput);
+        } catch {
+            throw new Error('回调链接格式无效，请粘贴浏览器地址栏中完整的 http://localhost... 链接');
+        }
+        const errParam = parsed.searchParams.get('error');
+        if (errParam) {
+            throw new Error(`Google 授权失败: ${errParam}`);
+        }
+        authCode = parsed.searchParams.get('code') || authCode;
+        authState = parsed.searchParams.get('state') || authState;
+    }
+
+    if (!authCode) {
+        throw new Error('回调链接中缺少授权 code');
+    }
+
+    const flow = authState ? pendingOAuthFlows.get(authState) : null;
+    if (authState && !flow) {
+        throw new Error('授权会话已过期或无效，请重新生成登录链接');
+    }
+    if (authState) pendingOAuthFlows.delete(authState);
+
+    const form = new URLSearchParams({
+        code: authCode,
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        redirect_uri: flow?.redirectUri || DEFAULT_OAUTH_REDIRECT_URI,
+        grant_type: 'authorization_code',
+        ...(flow?.codeVerifier ? { code_verifier: flow.codeVerifier } : {}),
+    }).toString();
+
+    const tokResp = await httpsJsonRequest(GOOGLE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+    });
+    const tok = tokResp.data || {};
+    if (!tok.access_token) {
+        throw new Error('Google 未返回 access_token');
+    }
+
+    let userInfo = {};
+    try {
+        const uiResp = await httpsJsonRequest(GOOGLE_USERINFO_URL, {
+            headers: { Authorization: `Bearer ${tok.access_token}` },
+        });
+        userInfo = uiResp.data || {};
+    } catch { /* fallback to id_token claims */ }
+
+    const claims = decodeJwtPayload(tok.id_token);
+    const email = userInfo.email || claims.email || null;
+    const expiresIn = Number(tok.expires_in) || 3599;
+    const expiryIso = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+    const credObj = {
+        token: {
+            access_token: tok.access_token,
+            refresh_token: tok.refresh_token || '',
+            token_type: tok.token_type || 'Bearer',
+            expiry: expiryIso,
+            expires_in: expiresIn,
+        },
+        auth_method: 'consumer',
+        ...(tok.id_token ? { id_token: tok.id_token } : {}),
+        ...(email ? { id_token_email: email } : {}),
+    };
+
+    return importOAuthAccount({
+        alias,
+        credentialJson: credObj,
+        force: true,
+        activate: Boolean(activate),
+    }, {
+        ...opts,
+        reloadHub: activate && opts.reloadHub !== false,
+    });
 }
 
 async function importOAuthAccount({ alias, credentialJson, force = false, activate = false } = {}, opts = {}) {
@@ -619,4 +1065,9 @@ module.exports = {
     importOAuthAccount,
     renameOAuthAccount,
     deleteOAuthAccount,
+    fetchAccountQuota,
+    rotateOAuthAccount,
+    startWebOAuthFlow,
+    completeWebOAuthFlow,
+    refreshCredentialObject,
 };

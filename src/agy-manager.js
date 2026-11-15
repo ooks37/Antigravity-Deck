@@ -145,12 +145,19 @@ function createAgyManager(deps = {}) {
         };
     }
 
-    async function runAgy(binPath, args, timeoutMs = 15000) {
+    function buildAgyEnv() {
+        const merged = getChildProcessEnv({ ...env, HOME: env.HOME || homeDir || os.homedir() });
+        if (!merged.HOME) merged.HOME = homeDir || os.homedir();
+        return merged;
+    }
+
+    async function runAgy(binPath, args, timeoutMs = 15000, cwd = undefined) {
         return execFileAsync(binPath, args, {
             timeout: timeoutMs,
             windowsHide: true,
-            maxBuffer: 2 * 1024 * 1024,
-            env: getChildProcessEnv(env),
+            maxBuffer: 4 * 1024 * 1024,
+            env: buildAgyEnv(),
+            ...(cwd ? { cwd } : {}),
         });
     }
 
@@ -315,11 +322,91 @@ function createAgyManager(deps = {}) {
         }
     }
 
+    async function runAgyPrompt({ prompt, model, workspace, timeoutMs = 120000 } = {}) {
+        if (!prompt || !String(prompt).trim()) {
+            return { statusCode: 400, success: false, error: 'prompt 不能为空' };
+        }
+        const binary = await findAgyBinary();
+        if (!binary.found) {
+            return { statusCode: 404, success: false, error: binary.error || '未检测到 agy CLI' };
+        }
+
+        const args = ['-p', String(prompt).trim(), '--output-format', 'stream-json'];
+        if (model && typeof model === 'string' && model.trim()) {
+            args.push('--model', model.trim());
+        }
+        const cwd = workspace && typeof workspace === 'string' && existsSync(workspace) ? workspace : undefined;
+
+        try {
+            const { stdout, stderr } = await runAgy(binary.path, args, timeoutMs, cwd);
+            const rawLines = String(stdout || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+            const events = [];
+            let finalText = '';
+            let sessionId = null;
+
+            for (const line of rawLines) {
+                try {
+                    const obj = JSON.parse(line);
+                    events.push(obj);
+                    if (obj.session_id) sessionId = obj.session_id;
+                    if (typeof obj.result === 'string' && obj.result.trim()) {
+                        finalText = obj.result;
+                    } else if (obj.type === 'assistant' && Array.isArray(obj.message?.content)) {
+                        const chunks = obj.message.content
+                            .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+                            .map((c) => c.text)
+                            .join('');
+                        if (chunks) finalText = chunks;
+                    } else if (typeof obj.text === 'string' && !finalText) {
+                        finalText = obj.text;
+                    }
+                } catch {
+                    // non-JSON output line
+                }
+            }
+
+            if (!finalText) finalText = String(stdout || '').trim();
+            return {
+                statusCode: 200,
+                success: true,
+                path: binary.path,
+                sessionId,
+                text: finalText,
+                eventsCount: events.length,
+                stderr: String(stderr || '').trim() || null,
+            };
+        } catch (err) {
+            const detail = String(err?.stderr || err?.stdout || err?.message || 'agy 执行失败').trim();
+            return {
+                statusCode: 500,
+                success: false,
+                path: binary.path,
+                error: detail.split(/\r?\n/)[0].slice(0, 300),
+                detail: detail.slice(0, 2000),
+            };
+        }
+    }
+
+    async function getAgyModels() {
+        const binary = await findAgyBinary();
+        if (!binary.found) {
+            return { statusCode: 404, success: false, error: binary.error, models: [] };
+        }
+        try {
+            const { stdout } = await runAgy(binary.path, ['models'], 10000);
+            return { statusCode: 200, success: true, raw: String(stdout || '').trim() };
+        } catch (err) {
+            return { statusCode: 500, success: false, error: err.message, models: [] };
+        }
+    }
+
     return {
         findAgyBinary,
         getAgyStatus,
         getAgyChangelog,
         updateAgy,
+        runAgyPrompt,
+        getAgyModels,
     };
 }
 

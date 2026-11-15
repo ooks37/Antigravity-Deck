@@ -7,7 +7,7 @@ import { extractStepContent, exportToMarkdown } from '@/lib/step-utils';
 import { Timeline } from '@/components/timeline';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, WifiOff, Rocket, Loader2, Check, Smartphone, Share2, X, Users, Settings, KeyRound, Network, RotateCw, Power } from 'lucide-react';
+import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, WifiOff, Rocket, Loader2, Check, Smartphone, Share2, X, Users, Settings, KeyRound, Network, RotateCw, Power, Wrench } from 'lucide-react';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import type { Project } from '@/lib/conversations';
@@ -30,10 +30,11 @@ import { SourceControlView } from '@/components/source-control-view';
 import { ResourceMonitorView } from '@/components/resource-monitor-view';
 import { ConversationHistoryView } from '@/components/conversation-history-view';
 import { WorkspaceOnboardModal } from '@/components/workspace-onboard-modal';
+import type { ToolboxTab } from '@/components/toolbox-drawer';
 import { notificationService } from '@/lib/notifications';
 import { initAppLogger } from '@/lib/app-logger';
 import { usePwaInstall } from '@/hooks/use-pwa-install';
-import { getSettings, getProfiles, getProxyState, useProxyNode, rotateProxyNode, type ProxyState } from '@/lib/cascade-api';
+import { getSettings, getProfiles, getProxyState, useProxyNode, rotateProxyNode, type ProxyState, type FleetServer } from '@/lib/cascade-api';
 
 
 // Lazy-load components that are hidden by default
@@ -43,6 +44,7 @@ const McpView = dynamic(() => import('@/components/mcp-view').then(m => ({ defau
 const WorkflowsView = dynamic(() => import('@/components/workflows-view').then(m => ({ default: m.WorkflowsView })), { ssr: false });
 const MemoriesView = dynamic(() => import('@/components/memories-view').then(m => ({ default: m.MemoriesView })), { ssr: false });
 const RepoInfoView = dynamic(() => import('@/components/repo-info-view').then(m => ({ default: m.RepoInfoView })), { ssr: false });
+const ToolboxView = dynamic(() => import('@/components/toolbox-drawer').then(m => ({ default: m.ToolboxView })), { ssr: false });
 
 /** Read a JSON-serialised value from localStorage (SSR-safe). */
 function getStoredValue<T>(key: string, fallback: T): T {
@@ -231,7 +233,15 @@ export default function Home() {
   const [showMemories, setShowMemories] = useState(false);
   // NEW: When true, show Repo Info panel in main panel
   const [showRepoInfo, setShowRepoInfo] = useState(false);
-  // Conversation History is the default main view; this filters it to a project (null = all).
+  // Explicit History view toggle (Doubao default lands directly on New Chat instead)
+  const [showHistoryPage, setShowHistoryPage] = useState(false);
+  // Consolidated Toolbox drawer/view for IDE tools (MCP / Workflows / Memories / Resources / Logs / Repo / Git)
+  const [showToolbox, setShowToolbox] = useState(false);
+  const [toolboxTab, setToolboxTab] = useState<ToolboxTab>('mcp');
+  // Target fleet server selected from sidebar quick-view
+  const [targetServer, setTargetServer] = useState<FleetServer | null>(null);
+  const [prefillPrompt, setPrefillPrompt] = useState<{ text: string; seq: number } | null>(null);
+  // Conversation History is filtered to a project when set (null = all).
   const [historyProjectId, setHistoryProjectId] = useState<string | null>(null);
   // Bumped when sidebar creates a workspace, so panels refresh their lists
   const [wsVersion, setWsVersion] = useState(0);
@@ -293,6 +303,8 @@ export default function Home() {
     setShowWorkflows(false);
     setShowMemories(false);
     setShowRepoInfo(false);
+    setShowToolbox(false);
+    setShowHistoryPage(false);
   }, []);
 
   // === Sidebar or History: click conversation → open chat ===
@@ -306,6 +318,7 @@ export default function Home() {
   const handleNewChat = useCallback(() => {
     selectConversation(null);
     resetPanels();
+    setTargetServer(null);
     setNewChatWorkspaceUri(null);
     setNewChatMode(true);
   }, [selectConversation, resetPanels]);
@@ -316,6 +329,7 @@ export default function Home() {
     resetPanels();
     setActiveWorkspace(null);
     setHistoryProjectId(null);
+    setTargetServer(null);
     setNewChatWorkspaceUri(null);
     setNewChatMode(true);
   }, [selectConversation, resetPanels]);
@@ -411,20 +425,46 @@ export default function Home() {
     setShowRepoInfo(true);
   }, [selectConversation, resetPanels]);
 
-  // === Show Conversation History (default main view), optionally filtered to a project ===
+  // === Show Conversation History view, optionally filtered to a project ===
   const handleShowHistory = useCallback((projectId: string | null = null) => {
     selectConversation(null);
     resetPanels();
     setActiveWorkspace(null);
     setHistoryProjectId(projectId);
+    setShowHistoryPage(true);
   }, [selectConversation, resetPanels]);
 
-  // === Go Home — reset to the default Conversation History view ===
+  // === Go Home — reset to the default Doubao New Chat view ===
   const handleGoHome = useCallback(() => {
     selectConversation(null);
     setActiveWorkspace(null);
     setHistoryProjectId(null);
+    setTargetServer(null);
     resetPanels();
+    setNewChatMode(true);
+  }, [selectConversation, resetPanels]);
+
+  // === Open Consolidated IDE Toolbox ===
+  const handleShowToolbox = useCallback((tab: ToolboxTab = 'mcp') => {
+    selectConversation(null);
+    resetPanels();
+    setToolboxTab(tab);
+    setShowToolbox(true);
+  }, [selectConversation, resetPanels]);
+
+  // === Select target fleet server from sidebar ===
+  const handleSelectServer = useCallback((server: FleetServer) => {
+    selectConversation(null);
+    resetPanels();
+    setActiveWorkspace(null);
+    setHistoryProjectId(null);
+    setNewChatWorkspaceUri(null);
+    setTargetServer(server);
+    setPrefillPrompt({
+      text: `请通过 baota-hub 检查服务器 ${server.id}${server.name ? ` (${server.name})` : ''}${server.ip ? ` [${server.ip}]` : ''} 的运行状态、CPU/内存/磁盘及当前服务列表。`,
+      seq: Date.now(),
+    });
+    setNewChatMode(true);
   }, [selectConversation, resetPanels]);
 
   // When CascadePanel creates a new cascade, track it
@@ -532,11 +572,10 @@ export default function Home() {
   const currentConvInfo = currentConvId ? conversations[currentConvId] : null;
 
   // === Determine what to show in main panel ===
-  // When LS not detected, force the detection screen regardless of stored state.
-  const anyOverlay = showAccountInfo || showSettings || showLogs || showSourceControl || showResources || showMcp || showWorkflows || showMemories || showRepoInfo;
-  const showChat = detected && (currentConvId !== null || newChatMode);
-  // Conversation History is the default main view whenever nothing else is active.
-  const showHistoryView = detected && !showChat && !anyOverlay;
+  const anyOverlay = showAccountInfo || showSettings || showLogs || showSourceControl || showResources || showMcp || showWorkflows || showMemories || showRepoInfo || showToolbox;
+  // Doubao UX: land directly on ChatView (even while LS reconnects so agy CLI / controls remain usable)
+  const showHistoryView = showHistoryPage && !anyOverlay && currentConvId === null;
+  const showChat = !anyOverlay && !showHistoryView;
 
   return (
     <AuthGate>
@@ -563,6 +602,8 @@ export default function Home() {
           onShowHistory={handleShowHistory}
           onGoHome={handleGoHome}
           onConvDeleted={handleConvDeleted}
+          onSelectServer={handleSelectServer}
+          onShowToolbox={() => handleShowToolbox()}
         />
 
         {/* Main content */}
@@ -572,14 +613,14 @@ export default function Home() {
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               {/* Hamburger — provided by Shadcn SidebarTrigger */}
               <SidebarTrigger className="-ml-1 w-9 h-9" />
-              <div className="flex items-center gap-1.5">
-                <FolderSync className="w-4 h-4" />
+              <div className="flex items-center gap-1.5 cursor-pointer" onClick={handleGoHome} title="返回新建对话">
+                <FolderSync className="w-4 h-4 text-primary" />
                 {activeWorkspace ? (
                   <span className="font-semibold text-sm truncate max-w-[120px] sm:max-w-[200px]">{activeWorkspace}</span>
                 ) : (
                   <>
-                    <span className="font-semibold text-sm">Antigravity Deck</span>
-                    <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono inline-flex">v3</Badge>
+                    <span className="font-semibold text-sm">Antigravity 工作台</span>
+                    <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono inline-flex">Cloud</Badge>
                   </>
                 )}
               </div>
@@ -684,15 +725,28 @@ export default function Home() {
                 </DropdownMenu>
 
                 <button
+                  onClick={() => handleShowToolbox()}
+                  title="打开扩展工具箱（MCP / 工作流 / 记忆库 / 监控 / 日志 / Git）"
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
+                    showToolbox
+                      ? 'bg-primary/15 text-primary border-primary/40'
+                      : 'bg-muted/40 hover:bg-muted text-foreground/80 border-border/50'
+                  }`}
+                >
+                  <Wrench className="w-3 h-3 text-muted-foreground" />
+                  <span className="hidden sm:inline">工具箱</span>
+                </button>
+
+                <button
                   onClick={handleShowAccountInfo}
                   title={accountBadge?.email ? `当前账号: ${accountBadge.email}（点击切换/管理）` : '点击打开多账号管理与配额'}
                   className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
                     showAccountInfo
-                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                      ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border-indigo-500/40'
                       : 'bg-muted/40 hover:bg-muted text-foreground/80 border-border/50'
                   }`}
                 >
-                  <Users className="w-3 h-3 text-indigo-400" />
+                  <Users className="w-3 h-3 text-indigo-500 dark:text-indigo-400" />
                   <span className="max-w-[90px] truncate hidden sm:inline">
                     {accountBadge?.label || '多账号'}
                   </span>
@@ -701,13 +755,13 @@ export default function Home() {
                   )}
                 </button>
                 {/* WebSocket connection status */}
-                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${connected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${connected ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-red-500 dark:bg-red-400'}`} />
                   <span>WS</span>
                 </div>
                 {/* Language Server detection status */}
-                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${detected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : connected ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-muted text-muted-foreground border border-border/30'}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${detected ? 'bg-emerald-400' : connected ? 'bg-amber-400 animate-pulse' : 'bg-muted-foreground/50'}`} />
+                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${detected ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : connected ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' : 'bg-muted text-muted-foreground border border-border/30'}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${detected ? 'bg-emerald-500 dark:bg-emerald-400' : connected ? 'bg-amber-500 dark:bg-amber-400 animate-pulse' : 'bg-muted-foreground/50'}`} />
                   <span>{detected ? 'LS 已连接' : connected ? '探测中...' : 'LS 离线'}</span>
                 </div>
               </div>
@@ -757,82 +811,40 @@ export default function Home() {
             </div>
           )}
 
-          {/* === Main panel content === */}
-          {!detected && !showSettings && !showAccountInfo && !showResources && (
-            <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
+          {/* === Main panel status strip when LS is offline/reloading (non-blocking) === */}
+          {!detected && !anyOverlay && (
+            <div className="px-3 sm:px-5 py-2 bg-amber-500/10 border-b border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-xs">
               {swapping ? (
-                <div className="text-center space-y-4 max-w-sm">
-                  <div className="flex items-center justify-center gap-3">
-                    <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
-                    <h2 className="text-xl font-semibold text-foreground/80">正在切换账号...</h2>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    正在安全保存并切换账号配置，预计需要几秒钟。
-                  </p>
-                  <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground/70">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400/75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
-                    </span>
-                    <span>等待 Antigravity 就绪...</span>
-                  </div>
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>正在切换账号并热重载 Antigravity Hub（约 3 秒）...</span>
                 </div>
               ) : (
-              <div className="text-center space-y-5 max-w-md w-full">
-                <div className="flex items-center justify-center gap-3">
-                  <WifiOff className="w-7 h-7 text-muted-foreground/60" />
-                  <h2 className="text-xl font-semibold text-foreground/90">未检测到 Antigravity 服务</h2>
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 min-w-0">
+                  <WifiOff className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    Antigravity Hub 暂未连接，可先使用下方 <strong>agy 直连</strong> 或切换 / 检查多账号状态
+                  </span>
                 </div>
-
-                {accountBadge?.label && (
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-400">
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>当前活跃账号: <strong>{accountBadge.label}</strong>{accountBadge.email ? ` (${accountBadge.email})` : ''}</span>
-                  </div>
-                )}
-
-                <ol className="text-left space-y-2.5 rounded-xl bg-muted/15 border border-border/40 px-5 py-4">
-                  {[
-                    '本地桌面模式：打开 Antigravity IDE 并打开项目文件夹即可自动连接',
-                    'Linux VPS / CLI 模式：可直接管理多用户 OAuth 账号池并手动更新 agy CLI',
-                    '桌面启动后 Antigravity Deck 将在约 10 秒内自动发现服务',
-                  ].map((text, i) => (
-                    <li key={i} className="flex items-start gap-3 text-xs sm:text-sm text-muted-foreground">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted/40 flex items-center justify-center text-xs font-medium text-foreground/80">
-                        {i + 1}
-                      </span>
-                      <span>{text}</span>
-                    </li>
-                  ))}
-                </ol>
-
-                <div className="flex flex-col items-center gap-2.5">
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button
-                      onClick={handleShowAccountInfo}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition-colors cursor-pointer"
-                    >
-                      <Users className="w-3.5 h-3.5" />
-                      多账号切换 / 管理
-                    </button>
-                    <LaunchIdeButton />
-                  </div>
+              )}
+              {!swapping && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleShowAccountInfo}
+                    className="px-2.5 py-1 rounded-md bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 font-medium cursor-pointer"
+                  >
+                    多账号切换
+                  </button>
                   <button
                     onClick={handleShowSettings}
-                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors cursor-pointer"
+                    className="px-2.5 py-1 rounded-md bg-muted/60 hover:bg-muted text-foreground/80 border border-border/50 font-medium cursor-pointer"
                   >
-                    <Settings className="w-3 h-3" />
-                    打开应用设置 / 手动更新 agy CLI
+                    设置
                   </button>
-                </div>
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground/70">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400/75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+                  <span className="hidden md:inline-flex scale-90 origin-right">
+                    <LaunchIdeButton />
                   </span>
-                  <span>正在扫描 Antigravity Language Server...</span>
                 </div>
-              </div>
               )}
             </div>
           )}
@@ -840,13 +852,13 @@ export default function Home() {
           {showAccountInfo && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               {!detected && (
-                <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-300">
-                  <span>当前尚未检测到运行中的 Antigravity IDE，你仍可在此零延迟切换、导入与管理全部 OAuth / 档案账号。</span>
+                <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-300">
+                  <span>当前尚未检测到运行中的 Antigravity Hub，你仍可在此零延迟切换、导入与管理全部 OAuth 账号并自动热重载。</span>
                   <button
                     onClick={handleGoHome}
-                    className="underline hover:text-amber-200 flex-shrink-0 ml-3 cursor-pointer"
+                    className="underline hover:opacity-80 flex-shrink-0 ml-3 cursor-pointer"
                   >
-                    返回检测界面
+                    返回工作台
                   </button>
                 </div>
               )}
@@ -857,13 +869,13 @@ export default function Home() {
           {showSettings && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               {!detected && (
-                <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-300">
-                  <span>当前尚未检测到运行中的 Antigravity IDE，你仍可在此配置路径或手动更新 agy CLI。</span>
+                <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-300">
+                  <span>当前尚未检测到运行中的 Antigravity Hub，你仍可在此配置路径、守卫策略与登录密码。</span>
                   <button
                     onClick={handleGoHome}
-                    className="underline hover:text-amber-200 flex-shrink-0 ml-3 cursor-pointer"
+                    className="underline hover:opacity-80 flex-shrink-0 ml-3 cursor-pointer"
                   >
-                    返回检测界面
+                    返回工作台
                   </button>
                 </div>
               )}
@@ -933,7 +945,19 @@ export default function Home() {
             </div>
           )}
 
-          {/* Conversation History — default main view; grouped by project, searchable */}
+          {/* Consolidated Toolbox drawer/view */}
+          {showToolbox && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <ToolboxView
+                initialTab={toolboxTab}
+                activeWorkspace={activeWorkspace}
+                detected={detected}
+                onClose={() => setShowToolbox(false)}
+              />
+            </div>
+          )}
+
+          {/* Conversation History — explicit view when opened from sidebar */}
           {showHistoryView && (
             <ConversationHistoryView
               currentConvId={currentConvId}
@@ -964,6 +988,12 @@ export default function Home() {
                 onToggleAnalytics={() => setShowAnalytics(v => !v)}
                 onExport={handleExport}
                 onShowSettings={handleShowSettings}
+                detected={detected}
+                targetServer={targetServer}
+                onClearTargetServer={() => setTargetServer(null)}
+                prefillPrompt={prefillPrompt}
+                activeAccountLabel={accountBadge?.label || null}
+                onOpenAccounts={handleShowAccountInfo}
               />
 
               {/* Step Detail Sheet */}

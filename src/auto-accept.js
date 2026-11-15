@@ -126,7 +126,7 @@ function setAutoAccept(val) {
 //   undefined → no recognizable member; caller falls back to the step-type switch
 const READONLY_PERMISSION_ACTION = /^(read|list|view|search|stat|glob|grep|find|fetch|get)/i;
 
-function buildFromRequestedInteraction(requested, step, autoAcceptMode) {
+function buildFromRequestedInteraction(requested, step, autoAcceptMode, autoAcceptPolicy = getAutoAcceptPolicy()) {
     const has = (m) => requested[m] !== undefined && requested[m] !== null && typeof requested[m] === 'object';
 
     // permission — the 2.0.11 "outside-of-project" access gate (PermissionInteraction).
@@ -180,6 +180,11 @@ function buildFromRequestedInteraction(requested, step, autoAcceptMode) {
 
     if (has('runCommand')) {
         const cmd = step.runCommand?.commandLine || step.runCommand?.command || '';
+        const policy = autoAcceptPolicy || getAutoAcceptPolicy();
+        if (autoAcceptMode && policy === 'smart' && isDangerousCommand(cmd)) {
+            console.warn(`[AutoAccept] Smart guard paused dangerous command for manual approval: ${cmd.slice(0, 120)}`);
+            return null;
+        }
         return { runCommand: { confirm: true, proposedCommandLine: cmd, submittedCommandLine: cmd } };
     }
 
@@ -214,7 +219,7 @@ function buildInteraction(stepInfo, options = {}) {
     const { trajectoryId, stepIndex, step } = stepInfo;
     if (!trajectoryId || stepIndex === undefined || !step) return null;
 
-    const { autoAcceptMode = false } = options; // Flag to distinguish auto-accept vs manual
+    const { autoAcceptMode = false, autoAcceptPolicy = getAutoAcceptPolicy() } = options; // Flag to distinguish auto-accept vs manual
 
     const interaction = { trajectoryId, stepIndex };
     const stepType = (step.type || '').replace('CORTEX_STEP_TYPE_', '');
@@ -222,7 +227,7 @@ function buildInteraction(stepInfo, options = {}) {
     // Authoritative path: answer the member the LS explicitly requested.
     const requested = step.requestedInteraction;
     if (requested && typeof requested === 'object') {
-        const viaRequested = buildFromRequestedInteraction(requested, step, autoAcceptMode);
+        const viaRequested = buildFromRequestedInteraction(requested, step, autoAcceptMode, autoAcceptPolicy);
         if (viaRequested === null) return null;
         if (viaRequested !== undefined) return { ...interaction, ...viaRequested };
         // fall through: requestedInteraction was empty/unusable — use the legacy switch
@@ -231,6 +236,11 @@ function buildInteraction(stepInfo, options = {}) {
     switch (stepType) {
         case 'RUN_COMMAND': {
             const cmd = step.runCommand?.commandLine || step.runCommand?.command || '';
+            const policy = autoAcceptPolicy || getAutoAcceptPolicy();
+            if (autoAcceptMode && policy === 'smart' && isDangerousCommand(cmd)) {
+                console.warn(`[AutoAccept] Smart guard paused dangerous command for manual approval: ${cmd.slice(0, 120)}`);
+                return null;
+            }
             interaction.runCommand = {
                 confirm: true,
                 proposedCommandLine: cmd,
@@ -691,9 +701,47 @@ async function autoAcceptPollNow() {
     }
 }
 
+const DANGEROUS_COMMAND_PATTERNS = [
+    /\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*|--recursive|--force)\b/i,
+    /\bmkfs(\.[a-z0-9]+)?\b/i,
+    /\bdd\s+if=/i,
+    />\s*\/dev\/(sd|nvme|vd|hd)[a-z0-9]*/i,
+    /\b(reboot|shutdown|poweroff|halt|init\s+[06])\b/i,
+    /\bsystemctl\s+(stop|disable|mask)\s+(nginx|mysql|mariadb|postgresql|bt|panel|firewalld|ufw|docker|ssh|sshd)\b/i,
+    /\b(ufw\s+disable|iptables\s+-F|iptables\s+--flush)\b/i,
+    /\bDROP\s+(DATABASE|TABLE|SCHEMA)\b/i,
+    /\bTRUNCATE\s+TABLE\b/i,
+    /\bgit\s+(reset\s+--hard|push\s+.*(-f|--force))\b/i,
+    /\bpm2\s+(delete|kill)\b/i,
+    /\bkillall\s+-9\b/i,
+    /\bchmod\s+(-R\s+)?777\s+\/(\s|$)/i,
+    /\bchown\s+-R\s+.*\s+\/(\s|$)/i,
+    /\b(curl|wget)\s+[^|]*\|\s*(ba)?sh\b/i,
+];
+
+function isDangerousCommand(commandLine) {
+    const cmd = String(commandLine || '').trim();
+    if (!cmd) return false;
+    return DANGEROUS_COMMAND_PATTERNS.some((re) => re.test(cmd));
+}
+
+function getAutoAcceptPolicy() {
+    const p = getSettings().autoAcceptPolicy;
+    return p === 'full' ? 'full' : 'smart';
+}
+
+function setAutoAcceptPolicy(policy) {
+    const next = policy === 'full' ? 'full' : 'smart';
+    saveSettings({ autoAcceptPolicy: next });
+    return next;
+}
+
 module.exports = {
     getAutoAccept,
     setAutoAccept,
+    getAutoAcceptPolicy,
+    setAutoAcceptPolicy,
+    isDangerousCommand,
     buildInteraction,
     denyInteraction,
     buildAcceptPayload,

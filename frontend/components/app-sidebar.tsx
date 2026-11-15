@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { createWorkspace, getProfiles, useOAuthAccount } from "@/lib/cascade-api"
-import type { OAuthListResponse, ResourceSnapshot } from "@/lib/cascade-api"
-import { loadConversationIndex, groupByProject } from "@/lib/conversations"
+import { createWorkspace, getProfiles, switchOAuthAccount } from "@/lib/cascade-api"
+import type { OAuthListResponse, ResourceSnapshot, FleetServer } from "@/lib/cascade-api"
+import { loadConversationIndex, groupByProject, groupByTimeBucket, relTime } from "@/lib/conversations"
 import type { Project, ConvRow } from "@/lib/conversations"
+import { FleetQuickList } from "./sidebar/fleet-quick-list"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/lib/theme"
 import { API_BASE } from "@/lib/config"
@@ -48,7 +49,7 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Settings, Users, Check, KeyRound, Plug, ArrowLeftRight, Moon, Sun, Plus, FolderPlus, EllipsisVertical, Activity, FolderSync, Loader2, GitBranch, Monitor, Workflow, Brain, History, MessageSquare } from "lucide-react"
+import { Settings, Users, Check, KeyRound, ArrowLeftRight, Moon, Sun, Plus, FolderPlus, EllipsisVertical, Activity, FolderSync, Loader2, GitBranch, Monitor, History, MessageSquare, Search, Wrench } from "lucide-react"
 
 import { ProjectGroup } from "./sidebar/project-group"
 import { SystemResourceSummary } from "./sidebar/system-resource-summary"
@@ -80,6 +81,8 @@ interface AppSidebarProps {
     workspaceResources?: ResourceSnapshot | null
     /** Called after a conversation is deleted, with the deleted conv ID */
     onConvDeleted?: (convId: string) => void
+    onSelectServer?: (server: FleetServer) => void
+    onShowToolbox?: () => void
 }
 
 const LOOSE_LIMIT = 8
@@ -97,23 +100,28 @@ export function AppSidebar({
     onShowLogs,
     onShowSourceControl,
     onShowResources,
-    onShowMcp,
-    onShowWorkflows,
-    onShowMemories,
-    onShowRepoInfo,
+    onShowMcp: _onShowMcp,
+    onShowWorkflows: _onShowWorkflows,
+    onShowMemories: _onShowMemories,
+    onShowRepoInfo: _onShowRepoInfo,
     onShowHistory,
     onGoHome,
     workspaceResources,
     onConvDeleted,
+    onSelectServer,
+    onShowToolbox,
 }: AppSidebarProps) {
     const { isDark, toggle: toggleTheme } = useTheme()
     const { isMobile } = useSidebar()
 
     const [projects, setProjects] = useState<Project[]>([])
+    const [allRows, setAllRows] = useState<ConvRow[]>([])
     const [byProject, setByProject] = useState<Map<string, ConvRow[]>>(new Map())
     const [loose, setLoose] = useState<ConvRow[]>([])
     const [loading, setLoading] = useState(true)
     const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({})
+    const [searchQuery, setSearchQuery] = useState("")
+    const [historyTab, setHistoryTab] = useState<"time" | "project">("time")
 
     const [newName, setNewName] = useState("")
     const [creating, setCreating] = useState(false)
@@ -196,7 +204,7 @@ export function AppSidebar({
         if (switchingAlias) return
         setSwitchingAlias(alias)
         try {
-            const res = await useOAuthAccount(alias)
+            const res = await switchOAuthAccount(alias, { reloadHub: true, refreshIfExpired: true })
             fetchAccountSummary()
             window.dispatchEvent(new CustomEvent('oauth-account-swapped', { detail: res }))
         } catch {
@@ -211,6 +219,7 @@ export function AppSidebar({
         try {
             const { projects: projs, rows } = await loadConversationIndex()
             const { byProject: bp, loose: lo } = groupByProject(rows)
+            setAllRows(rows)
             setProjects(projs)
             setByProject(bp)
             setLoose(lo)
@@ -281,6 +290,14 @@ export function AppSidebar({
         }
     }, [newName, creating, nameValidationError, loadIndex, onProjectCreated])
 
+    const filteredRows = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase()
+        if (!q) return allRows
+        return allRows.filter((r) => r.title.toLowerCase().includes(q) || r.projectName.toLowerCase().includes(q))
+    }, [allRows, searchQuery])
+
+    const timeBuckets = useMemo(() => groupByTimeBucket(filteredRows), [filteredRows])
+
     // Build the ordered project list with their conversations + total counts.
     const projectRows = useMemo(
         () => projects.map((p) => ({
@@ -297,152 +314,203 @@ export function AppSidebar({
                 <SidebarHeader>
                     <button
                         onClick={onGoHome}
-                        className="flex items-center gap-2 px-4 py-2 mt-2 hover:opacity-80 transition-opacity cursor-pointer"
+                        className="flex items-center gap-2 px-3 py-2 mt-1 hover:opacity-80 transition-opacity cursor-pointer"
                     >
-                        <FolderSync className="h-5 w-5 text-primary" />
-                        <span className="font-semibold text-lg tracking-tight">Antigravity Deck</span>
+                        <div className="w-6 h-6 rounded-lg bg-primary text-primary-foreground flex items-center justify-center">
+                            <FolderSync className="h-3.5 w-3.5" />
+                        </div>
+                        <span className="font-semibold text-base tracking-tight">Antigravity 工作台</span>
                     </button>
+
+                    {/* Primary Doubao New Chat Pill + Search */}
+                    <div className="px-2 pb-1 space-y-1.5">
+                        <Button
+                            size="sm"
+                            onClick={onNewConversation}
+                            className="w-full h-9 rounded-xl text-xs font-medium gap-1.5 justify-center shadow-xs"
+                        >
+                            <Plus className="h-4 w-4" />
+                            开启新对话
+                        </Button>
+                        <div className="relative">
+                            <Search className="h-3.5 w-3.5 text-muted-foreground/60 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <Input
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="搜索历史对话..."
+                                className="h-7 pl-7 pr-2 text-xs rounded-lg bg-background/70 border-border/60"
+                            />
+                        </div>
+                    </div>
                 </SidebarHeader>
 
-                {/* System Resource Summary — compact CPU/RAM bars */}
-                <div className="px-3 pb-1">
-                    <SystemResourceSummary
-                        system={workspaceResources?.system}
-                        onClick={onShowResources}
-                    />
-                </div>
-
                 <SidebarContent>
-                    <SidebarSeparator className="mx-0" />
-
-                    {/* Top actions: New Conversation + Conversation History */}
-                    <SidebarGroup>
-                        <SidebarGroupContent>
-                            <div className="px-2 pb-1">
-                                <Button
-                                    size="sm"
-                                    onClick={onNewConversation}
-                                    className="w-full h-8 text-xs gap-1.5 justify-start"
-                                >
-                                    <Plus className="h-3.5 w-3.5" />
-                                    新建对话
-                                </Button>
-                            </div>
-                            <SidebarMenu>
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={() => onShowHistory(null)} tooltip="历史对话" className="text-xs">
-                                        <History className="shrink-0" />
-                                        <span>历史对话</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                            </SidebarMenu>
-                        </SidebarGroupContent>
-                    </SidebarGroup>
-
-                    <SidebarSeparator className="mx-0" />
-
-                    {/* Projects */}
-                    <SidebarGroup>
-                        <SidebarGroupLabel>项目列表</SidebarGroupLabel>
-                        <SidebarGroupAction title="新建项目" onClick={() => setShowCreateDialog(true)}>
-                            <Plus /> <span className="sr-only">新建项目</span>
-                        </SidebarGroupAction>
-                        <SidebarGroupContent>
-                            {loading && projectRows.length === 0 && (
-                                <div className="px-3 py-4 text-xs text-muted-foreground text-center">加载中...</div>
-                            )}
-                            {!loading && projectRows.length === 0 && (
-                                <div className="px-3 py-3 text-[11px] text-muted-foreground/50 text-center">
-                                    暂无项目。请在 Antigravity 中打开文件夹，或点击右上角 ＋ 新建。
-                                </div>
-                            )}
-                            {projectRows.map(({ project, conversations, total }) => (
-                                <ProjectGroup
-                                    key={project.id}
-                                    name={project.name}
-                                    totalCount={total}
-                                    conversations={conversations}
-                                    currentConvId={currentConvId}
-                                    expanded={!!expandedMap[project.id]}
-                                    onToggle={() => toggleProject(project.id)}
-                                    onSelectConv={(convId) => onSelectConversation(convId, project.name)}
-                                    onSeeAll={() => onShowHistory(project.id)}
-                                    onNewConversation={() => onNewProjectConversation(project)}
-                                    onDeleted={handleConvDeleted}
-                                />
-                            ))}
-                        </SidebarGroupContent>
-                    </SidebarGroup>
-
-                    {/* Loose conversations (no project) */}
-                    {loose.length > 0 && (
+                    {/* Server Fleet Overview */}
+                    {onSelectServer && (
                         <>
+                            <FleetQuickList onSelectServer={onSelectServer} />
                             <SidebarSeparator className="mx-0" />
-                            <SidebarGroup>
-                                <SidebarGroupLabel>独立对话</SidebarGroupLabel>
-                                <SidebarGroupContent>
-                                    <SidebarMenu>
-                                        {loose.slice(0, LOOSE_LIMIT).map((conv) => (
-                                            <SidebarMenuItem key={conv.id}>
-                                                <SidebarMenuButton
-                                                    isActive={conv.id === currentConvId}
-                                                    onClick={() => onSelectConversation(conv.id, conv.projectName || 'unknown')}
-                                                    tooltip={conv.title}
-                                                    className="text-xs"
-                                                >
-                                                    <MessageSquare className="shrink-0" />
-                                                    <span className="truncate min-w-0">{conv.title}</span>
-                                                </SidebarMenuButton>
-                                            </SidebarMenuItem>
-                                        ))}
-                                        {loose.length > LOOSE_LIMIT && (
-                                            <SidebarMenuItem>
-                                                <SidebarMenuButton
-                                                    onClick={() => onShowHistory(null)}
-                                                    className="text-sidebar-foreground/50 text-[10px]"
-                                                >
-                                                    查看全部 ({loose.length})
-                                                </SidebarMenuButton>
-                                            </SidebarMenuItem>
-                                        )}
-                                    </SidebarMenu>
-                                </SidebarGroupContent>
-                            </SidebarGroup>
                         </>
                     )}
 
-                    {/* Tools (kept Deck features) */}
+                    {/* History Switch Tabs: Time-grouped (Doubao) vs Project tree */}
+                    <div className="px-2.5 pt-1 flex items-center justify-between gap-1">
+                        <div className="inline-flex rounded-lg bg-muted/60 p-0.5 text-[11px]">
+                            <button
+                                type="button"
+                                onClick={() => setHistoryTab("time")}
+                                className={cn(
+                                    "px-2 py-0.5 rounded-md transition-colors cursor-pointer",
+                                    historyTab === "time" ? "bg-background text-foreground font-medium shadow-2xs" : "text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                最近对话
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setHistoryTab("project")}
+                                className={cn(
+                                    "px-2 py-0.5 rounded-md transition-colors cursor-pointer",
+                                    historyTab === "project" ? "bg-background text-foreground font-medium shadow-2xs" : "text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                按项目
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => onShowHistory(null)}
+                            className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer inline-flex items-center gap-0.5"
+                        >
+                            <History className="h-3 w-3" /> 全部
+                        </button>
+                    </div>
+
+                    {historyTab === "time" ? (
+                        <div className="px-1.5 py-1 space-y-2">
+                            {loading && allRows.length === 0 && (
+                                <div className="px-3 py-4 text-xs text-muted-foreground text-center">加载中...</div>
+                            )}
+                            {!loading && filteredRows.length === 0 && (
+                                <div className="px-3 py-4 text-[11px] text-muted-foreground/60 text-center">
+                                    {searchQuery ? "没有匹配的对话" : "暂无历史对话，点击上方开始提问"}
+                                </div>
+                            )}
+                            {timeBuckets.map((bucket) => (
+                                <SidebarGroup key={bucket.label} className="py-0">
+                                    <SidebarGroupLabel className="h-6 text-[10px] font-medium text-muted-foreground/75 px-2">
+                                        {bucket.label}
+                                    </SidebarGroupLabel>
+                                    <SidebarGroupContent>
+                                        <SidebarMenu>
+                                            {bucket.rows.slice(0, 15).map((conv) => (
+                                                <SidebarMenuItem key={conv.id}>
+                                                    <SidebarMenuButton
+                                                        isActive={conv.id === currentConvId}
+                                                        onClick={() => onSelectConversation(conv.id, conv.projectName || "unknown")}
+                                                        tooltip={conv.title}
+                                                        className="text-xs rounded-lg h-8 justify-between"
+                                                    >
+                                                        <span className="flex items-center gap-2 min-w-0 flex-1">
+                                                            <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                                                            <span className="truncate">{conv.title}</span>
+                                                        </span>
+                                                        {conv.lastModified && (
+                                                            <span className="text-[10px] text-muted-foreground/50 shrink-0 ml-1">
+                                                                {relTime(conv.lastModified)}
+                                                            </span>
+                                                        )}
+                                                    </SidebarMenuButton>
+                                                </SidebarMenuItem>
+                                            ))}
+                                        </SidebarMenu>
+                                    </SidebarGroupContent>
+                                </SidebarGroup>
+                            ))}
+                        </div>
+                    ) : (
+                        <>
+                            {/* Projects */}
+                            <SidebarGroup>
+                                <SidebarGroupLabel>项目列表</SidebarGroupLabel>
+                                <SidebarGroupAction title="新建项目" onClick={() => setShowCreateDialog(true)}>
+                                    <Plus /> <span className="sr-only">新建项目</span>
+                                </SidebarGroupAction>
+                                <SidebarGroupContent>
+                                    {loading && projectRows.length === 0 && (
+                                        <div className="px-3 py-4 text-xs text-muted-foreground text-center">加载中...</div>
+                                    )}
+                                    {!loading && projectRows.length === 0 && (
+                                        <div className="px-3 py-3 text-[11px] text-muted-foreground/50 text-center">
+                                            暂无项目。点击右上角 ＋ 新建项目目录。
+                                        </div>
+                                    )}
+                                    {projectRows.map(({ project, conversations, total }) => (
+                                        <ProjectGroup
+                                            key={project.id}
+                                            name={project.name}
+                                            totalCount={total}
+                                            conversations={conversations}
+                                            currentConvId={currentConvId}
+                                            expanded={!!expandedMap[project.id]}
+                                            onToggle={() => toggleProject(project.id)}
+                                            onSelectConv={(convId) => onSelectConversation(convId, project.name)}
+                                            onSeeAll={() => onShowHistory(project.id)}
+                                            onNewConversation={() => onNewProjectConversation(project)}
+                                            onDeleted={handleConvDeleted}
+                                        />
+                                    ))}
+                                </SidebarGroupContent>
+                            </SidebarGroup>
+
+                            {/* Loose conversations (no project) */}
+                            {loose.length > 0 && (
+                                <>
+                                    <SidebarSeparator className="mx-0" />
+                                    <SidebarGroup>
+                                        <SidebarGroupLabel>独立对话</SidebarGroupLabel>
+                                        <SidebarGroupContent>
+                                            <SidebarMenu>
+                                                {loose.slice(0, LOOSE_LIMIT).map((conv) => (
+                                                    <SidebarMenuItem key={conv.id}>
+                                                        <SidebarMenuButton
+                                                            isActive={conv.id === currentConvId}
+                                                            onClick={() => onSelectConversation(conv.id, conv.projectName || 'unknown')}
+                                                            tooltip={conv.title}
+                                                            className="text-xs"
+                                                        >
+                                                            <MessageSquare className="shrink-0" />
+                                                            <span className="truncate min-w-0">{conv.title}</span>
+                                                        </SidebarMenuButton>
+                                                    </SidebarMenuItem>
+                                                ))}
+                                            </SidebarMenu>
+                                        </SidebarGroupContent>
+                                    </SidebarGroup>
+                                </>
+                            )}
+                        </>
+                    )}
+
+                    {/* System Resource Summary + Compact Toolbox */}
                     <SidebarSeparator className="mx-0" />
-                    <SidebarGroup>
-                        <SidebarGroupContent>
-                            <SidebarMenu>
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowMcp} tooltip="MCP 服务" className="text-xs">
-                                        <Plug className="shrink-0" />
-                                        <span>MCP 服务</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowWorkflows} tooltip="工作流与技能" className="text-xs">
-                                        <Workflow className="shrink-0" />
-                                        <span>工作流</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowMemories} tooltip="长期记忆" className="text-xs">
-                                        <Brain className="shrink-0" />
-                                        <span>记忆库</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton onClick={onShowRepoInfo} tooltip="仓库信息" className="text-xs">
-                                        <GitBranch className="shrink-0" />
-                                        <span>仓库信息</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                            </SidebarMenu>
-                        </SidebarGroupContent>
-                    </SidebarGroup>
+                    <div className="px-3 py-1.5 space-y-1.5">
+                        <SystemResourceSummary
+                            system={workspaceResources?.system}
+                            onClick={onShowResources}
+                        />
+                        {onShowToolbox && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={onShowToolbox}
+                                className="w-full h-8 text-xs gap-1.5 justify-start rounded-lg bg-background/60"
+                            >
+                                <Wrench className="h-3.5 w-3.5 text-primary" />
+                                <span>高级工具箱 (MCP / 技能 / 记忆 / Git)</span>
+                            </Button>
+                        )}
+                    </div>
                 </SidebarContent>
 
                 <SidebarFooter>

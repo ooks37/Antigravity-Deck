@@ -25,6 +25,7 @@ const PRESETS = {
     strict: {
         label: '严格审核',
         autoAccept: false,
+        autoAcceptPolicy: 'smart',
         agentMode: 'default',
         toolPermission: 'strict',
         artifactReviewPolicy: 'asks-for-review',
@@ -34,6 +35,7 @@ const PRESETS = {
     default: {
         label: '默认平衡',
         autoAccept: false,
+        autoAcceptPolicy: 'smart',
         agentMode: 'default',
         toolPermission: 'request-review',
         artifactReviewPolicy: 'asks-for-review',
@@ -43,6 +45,7 @@ const PRESETS = {
     'accept-edits': {
         label: '自动改代码',
         autoAccept: true,
+        autoAcceptPolicy: 'smart',
         agentMode: 'accept-edits',
         toolPermission: 'request-review',
         artifactReviewPolicy: 'asks-for-review',
@@ -52,6 +55,7 @@ const PRESETS = {
     auto: {
         label: '沙盒全自动',
         autoAccept: true,
+        autoAcceptPolicy: 'smart',
         agentMode: 'auto',
         toolPermission: 'proceed-in-sandbox',
         artifactReviewPolicy: 'asks-for-review',
@@ -61,6 +65,7 @@ const PRESETS = {
     turbo: {
         label: '完全放行 (Turbo)',
         autoAccept: true,
+        autoAcceptPolicy: 'full',
         agentMode: 'auto',
         toolPermission: 'always-proceed',
         artifactReviewPolicy: 'always-proceed',
@@ -148,6 +153,16 @@ function createPermissionManager(options = {}) {
         return require('./auto-accept').setAutoAccept;
     };
 
+    const getAutoAcceptPolicyFn = () => {
+        if (options.getAutoAcceptPolicy) return options.getAutoAcceptPolicy;
+        return require('./auto-accept').getAutoAcceptPolicy;
+    };
+
+    const setAutoAcceptPolicyFn = () => {
+        if (options.setAutoAcceptPolicy) return options.setAutoAcceptPolicy;
+        return require('./auto-accept').setAutoAcceptPolicy;
+    };
+
     function getState() {
         const settingsPath = getSettingsPath();
         const exists = fs.existsSync(settingsPath);
@@ -168,6 +183,7 @@ function createPermissionManager(options = {}) {
 
         return {
             autoAccept: Boolean(getAutoAcceptFn()()),
+            autoAcceptPolicy: getAutoAcceptPolicyFn()(),
             settingsPath,
             fileExists: exists,
             parseError,
@@ -197,6 +213,9 @@ function createPermissionManager(options = {}) {
 
         if (input.autoAccept !== undefined) {
             setAutoAcceptFn()(Boolean(input.autoAccept));
+        }
+        if (input.autoAcceptPolicy !== undefined) {
+            setAutoAcceptPolicyFn()(input.autoAcceptPolicy);
         }
 
         const cliPatch = input.cli && typeof input.cli === 'object' ? input.cli : null;
@@ -277,6 +296,7 @@ function createPermissionManager(options = {}) {
         }
         return updatePermissions({
             autoAccept: preset.autoAccept,
+            autoAcceptPolicy: preset.autoAcceptPolicy,
             cli: {
                 agentMode: preset.agentMode,
                 toolPermission: preset.toolPermission,

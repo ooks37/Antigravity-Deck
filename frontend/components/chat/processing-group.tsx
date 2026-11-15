@@ -92,19 +92,19 @@ export const ProcessingGroup = memo(function ProcessingGroup({ steps: groupSteps
                                 variant="ghost"
                                 className={cn(
                                     'w-full flex items-center justify-start gap-2.5 px-4 py-2 h-auto text-xs',
-                                    'border border-transparent rounded-lg',
-                                    expanded ? 'bg-muted/40 border-border/50 rounded-b-none' : 'bg-muted/20 hover:bg-muted/40 hover:border-border/30'
+                                    'border transition-colors',
+                                    expanded ? 'bg-muted/60 border-border/70 rounded-t-xl rounded-b-none' : 'bg-muted/40 hover:bg-muted/70 border-border/50 rounded-full'
                                 )}
                             >
                                 <ChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform duration-200 shrink-0', expanded && 'rotate-90')} />
                                 <span className="text-muted-foreground/80"><Wrench className="h-3 w-3 text-muted-foreground/80" /></span>
-                                <span className="font-semibold text-muted-foreground">{normalSteps.length} 个步骤</span>
-                                <span className="text-[10px] text-muted-foreground/50 truncate flex-1 text-left font-mono">{summary}</span>
-                                <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground/60 shrink-0">#{first}{first !== last ? `–${last}` : ''}</Badge>
+                                <span className="font-semibold text-muted-foreground">{expanded ? '收起思考与执行过程' : '思考与执行过程'} · {normalSteps.length} 步</span>
+                                <span className="text-[10px] text-muted-foreground/60 truncate flex-1 text-left font-mono">{summary}</span>
+                                <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground/60 shrink-0 hidden sm:inline-flex">#{first}{first !== last ? `–${last}` : ''}</Badge>
                             </Button>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                            <div className="border border-t-0 border-border/50 rounded-b-lg bg-muted/10 py-1 px-1 space-y-0.5">
+                            <div className="border border-t-0 border-border/60 rounded-b-xl bg-muted/20 py-1 px-1 space-y-0.5">
                                 {normalSteps.map(({ step, originalIndex }) => {
                                     const config = getStepConfig(step.type);
                                     const content = extractStepContent(step) || '';

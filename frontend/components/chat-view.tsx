@@ -3,8 +3,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Step } from '@/lib/types';
 import { extractStepContent, getStepConfig } from '@/lib/step-utils';
-import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows } from '@/lib/cascade-api';
-import type { Workspace, CascadeModel, CascadeModelGroup, MediaItem, WorkflowItem } from '@/lib/cascade-api';
+import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows, getSettings, updatePermissionsConfig, getPermissionsConfig, uploadWorkspaceFile, rotateOAuthAccount, runAgyQuick } from '@/lib/cascade-api';
+import type { Workspace, CascadeModel, CascadeModelGroup, MediaItem, WorkflowItem, FleetServer, UploadedFileResult } from '@/lib/cascade-api';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Settings, Folder, Zap, BarChart2, RefreshCcw, SendHorizontal, Square, Paperclip, GitBranch, Plus, X, ChevronDown, Activity, Download, Bell, BellOff, Rocket, ArrowDown as ArrowDownIcon, Camera, Brain, Image as ImageIcon, Star } from 'lucide-react';
+import { Settings, Folder, Zap, BarChart2, RefreshCcw, SendHorizontal, Square, Paperclip, GitBranch, Plus, X, ChevronDown, Activity, Download, Bell, BellOff, Rocket, ArrowDown as ArrowDownIcon, Camera, Brain, Image as ImageIcon, Star, Shield, ShieldAlert, FileText, Loader2, RotateCw, Terminal } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { notificationService, NOTIFICATION_SETTINGS_CHANGED } from '@/lib/notifications';
 
@@ -47,6 +47,12 @@ interface ChatViewProps {
     onToggleAnalytics: () => void;
     onExport: () => void;
     onShowSettings?: () => void;
+    detected?: boolean;
+    targetServer?: FleetServer | null;
+    onClearTargetServer?: () => void;
+    prefillPrompt?: { text: string; seq: number } | null;
+    activeAccountLabel?: string | null;
+    onOpenAccounts?: () => void;
 }
 
 // === Classification ===
@@ -57,6 +63,8 @@ import { AgentResponse } from './chat/agent-response';
 import { ProcessingGroup } from './chat/processing-group';
 import { GeneratedImageStep } from './chat/generated-image-step';
 import { StreamingIndicator } from './chat/streaming-indicator';
+import { DoubaoWelcome } from './chat/doubao-welcome';
+import { TieredModelPicker } from './chat/tiered-model-picker';
 import { WorkflowAutocomplete } from './workflow-autocomplete';
 import type { WorkflowAutocompleteHandle } from './workflow-autocomplete';
 
@@ -81,7 +89,32 @@ function generateThumbnail(base64: string, mimeType: string, maxSize = 128): Pro
 }
 
 // === Main Chat View ===
-export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = false, onLoadOlder, currentConvId, currentWorkspace, newChatWorkspaceUri, wsVersion, cascadeStatus, onCascadeCreated, onNewConversation, showTimeline, onSetShowTimeline, showAnalytics, onToggleAnalytics, onExport, onShowSettings }: ChatViewProps) {
+export function ChatView({
+    steps,
+    baseIndex = 0,
+    stepCount = 0,
+    loadingOlder = false,
+    onLoadOlder,
+    currentConvId,
+    currentWorkspace,
+    newChatWorkspaceUri,
+    wsVersion,
+    cascadeStatus,
+    onCascadeCreated,
+    onNewConversation,
+    showTimeline,
+    onSetShowTimeline,
+    showAnalytics,
+    onToggleAnalytics,
+    onExport,
+    onShowSettings,
+    detected = true,
+    targetServer,
+    onClearTargetServer,
+    prefillPrompt,
+    activeAccountLabel,
+    onOpenAccounts,
+}: ChatViewProps) {
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     // activeCascadeId: derived from currentConvId, with local override for new chats
@@ -92,25 +125,33 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     const prevStepsLenRef = useRef(0);
     const prevBaseIndexRef = useRef(baseIndex);
 
-    // Auto-accept: synced with backend for instant server-side reaction
-    const [autoAccept, setAutoAccept] = useState<boolean>(false);
+    // Auto-accept + Smart Guard Policy ('smart' vs 'full')
+    const [autoAccept, setAutoAccept] = useState<boolean>(true);
+    const [autoAcceptPolicy, setAutoAcceptPolicy] = useState<'smart' | 'full'>('smart');
 
     // Workspace & model pickers
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [selectedWs, setSelectedWs] = useState<number | null>(null);
     const [models, setModels] = useState<CascadeModel[]>([]);
-    const [modelGroups, setModelGroups] = useState<CascadeModelGroup[]>([]);
+    const [, setModelGroups] = useState<CascadeModelGroup[]>([]);
     const [selectedModel, setSelectedModel] = useState<string>('');
-    const [showWsPicker, setShowWsPicker] = useState(false);
-    const [showModelPicker, setShowModelPicker] = useState(false);
+    const [, setShowWsPicker] = useState(false);
+    const [, setShowModelPicker] = useState(false);
     const [showTokens, setShowTokens] = useState(() => {
         if (typeof window === 'undefined') return false;
         try { const v = localStorage.getItem('antigravity-show-tokens'); return v ? JSON.parse(v) : false; } catch { return false; }
     });
-    // Multi-image state: array of pending images
+    // Multi-image + arbitrary uploaded files
     const [pendingImages, setPendingImages] = useState<{ id: string; name: string; mimeType: string; base64: string; dataUrl: string }[]>([]);
+    const [pendingFiles, setPendingFiles] = useState<UploadedFileResult[]>([]);
+    const [uploadingFile, setUploadingFile] = useState(false);
+    const [uploadNotice, setUploadNotice] = useState<string | null>(null);
     const [pendingMessage, setPendingMessage] = useState<string | null>(null);
     const [isDragOver, setIsDragOver] = useState(false);
+    // Quick agy CLI mode + inline CLI responses + account rotate state
+    const [useAgyCli, setUseAgyCli] = useState(false);
+    const [cliTurns, setCliTurns] = useState<Array<{ id: string; prompt: string; reply: string | null; error?: string | null; pending?: boolean }>>([]);
+    const [rotatingAccount, setRotatingAccount] = useState(false);
     // Workflow autocomplete state
     const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
     const [showWorkflows, setShowWorkflows] = useState(false);
@@ -256,11 +297,37 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                 }
             })
             .catch(() => { });
-        // Load auto-accept state from backend
+        // Load auto-accept + smart guard policy from backend
         getAutoAcceptState().then(s => setAutoAccept(s.enabled)).catch(() => { });
+        getPermissionsConfig().then(p => {
+            setAutoAccept(p.autoAccept);
+            if (p.autoAcceptPolicy === 'full' || p.autoAcceptPolicy === 'smart') {
+                setAutoAcceptPolicy(p.autoAcceptPolicy);
+            }
+        }).catch(() => { });
         // Load workflows
         fetchWorkflows(currentWorkspace || undefined).then(setWorkflows).catch(() => { });
     }, [wsVersion, currentWorkspace]);
+
+    // Refresh model quotas automatically when OAuth account swaps
+    useEffect(() => {
+        const reloadModels = () => {
+            getModels().then((m) => {
+                setModels(m.models || []);
+                setModelGroups(m.groups || []);
+            }).catch(() => { });
+        };
+        window.addEventListener('oauth-account-swapped', reloadModels);
+        return () => window.removeEventListener('oauth-account-swapped', reloadModels);
+    }, []);
+
+    // Apply prefilled prompt from sidebar fleet or quick actions
+    useEffect(() => {
+        if (prefillPrompt?.text) {
+            setInput(prefillPrompt.text);
+            setTimeout(() => inputRef.current?.focus(), 60);
+        }
+    }, [prefillPrompt]);
 
     // Reset localCascadeId when currentConvId changes
     useEffect(() => { setLocalCascadeId(null); }, [currentConvId]);
@@ -287,13 +354,70 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    // Upload arbitrary log/script/config file to workspace
+    const uploadOtherFile = useCallback(async (file: File) => {
+        if (file.size > 15 * 1024 * 1024) {
+            setUploadNotice(`文件「${file.name}」超过 15MB 限制`);
+            return;
+        }
+        setUploadingFile(true);
+        setUploadNotice(null);
+        try {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('读取文件失败'));
+                reader.readAsDataURL(file);
+            });
+            const uploaded = await uploadWorkspaceFile({
+                name: file.name,
+                contentBase64: dataUrl,
+                workspace: currentWorkspace || undefined,
+                mimeType: file.type || 'application/octet-stream',
+            });
+            setPendingFiles((prev) => [...prev, uploaded]);
+        } catch (err) {
+            setUploadNotice(err instanceof Error ? err.message : '上传文件失败');
+        } finally {
+            setUploadingFile(false);
+        }
+    }, [currentWorkspace]);
+
     // Send message
     const handleSend = useCallback(async () => {
-        const text = input.trim();
-        if ((!text && pendingImages.length === 0) || sending) return;
+        const rawText = input.trim();
+        if ((!rawText && pendingImages.length === 0 && pendingFiles.length === 0) || sending) return;
 
-        // Ensure backend workspace matches parent-controlled workspace
-        // No need to switch workspace — resolveInst handles routing on backend
+        let text = rawText;
+        if (targetServer && !activeCascadeId && !text.includes(targetServer.ip) && !text.includes(targetServer.id)) {
+            text = `[目标服务器: ${targetServer.id} (${targetServer.name} · ${targetServer.ip}${targetServer.combo ? ` · ${targetServer.combo}` : ''})]\n${text}`;
+        }
+        if (pendingFiles.length > 0) {
+            const refs = pendingFiles.map((f) => `- ${f.originalName} -> ${f.path}`).join('\n');
+            text = `${text ? `${text}\n\n` : ''}[已上传文件到工作区]\n${refs}`;
+        }
+
+        // Direct agy CLI mode or LS offline fallback
+        if (useAgyCli || !detected) {
+            const turnId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            setSending(true);
+            setInput('');
+            setPendingFiles([]);
+            setPendingImages([]);
+            setCliTurns((prev) => [...prev, { id: turnId, prompt: text, reply: null, pending: true }]);
+            try {
+                const res = await runAgyQuick({ prompt: text, model: selectedModel || undefined });
+                setCliTurns((prev) => prev.map((t) => (t.id === turnId
+                    ? { ...t, pending: false, reply: res.text || '', error: res.success ? null : (res.error || 'agy 执行失败') }
+                    : t)));
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : 'agy 执行失败';
+                setCliTurns((prev) => prev.map((t) => (t.id === turnId ? { ...t, pending: false, error: msg } : t)));
+            } finally {
+                setSending(false);
+            }
+            return;
+        }
 
         setSending(true);
         // Optimistic update: show user message immediately
@@ -332,12 +456,13 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
             }
             setInput('');
             setPendingImages([]);
+            setPendingFiles([]);
         } catch (e) {
             console.error('Send error:', e);
         } finally {
             setSending(false);
         }
-    }, [input, sending, activeCascadeId, selectedWs, selectedModel, pendingImages, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
+    }, [input, sending, activeCascadeId, selectedModel, pendingImages, pendingFiles, targetServer, useAgyCli, detected, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
 
     // Image handling — shared processor for adding files to pending images
     const processImageFile = useCallback((file: File) => {
@@ -361,10 +486,13 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     const handleImagePick = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files) return;
-        Array.from(files).forEach(f => processImageFile(f));
+        Array.from(files).forEach(f => {
+            if (f.type.startsWith('image/')) processImageFile(f);
+            else uploadOtherFile(f);
+        });
         // Reset input so same file can be re-selected
         if (fileInputRef.current) fileInputRef.current.value = '';
-    }, [processImageFile]);
+    }, [processImageFile, uploadOtherFile]);
 
     // Clipboard paste — capture ALL images from Ctrl+V
     const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -403,8 +531,9 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
         if (!files) return;
         Array.from(files).forEach(f => {
             if (f.type.startsWith('image/')) processImageFile(f);
+            else uploadOtherFile(f);
         });
-    }, [processImageFile]);
+    }, [processImageFile, uploadOtherFile]);
 
     const removeImage = useCallback((id: string) => {
         setPendingImages(prev => prev.filter(img => img.id !== id));
@@ -432,6 +561,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     const handleNewChat = useCallback(() => {
         setLocalCascadeId(null);
         setInput('');
+        setCliTurns([]);
         onNewConversation();
     }, [onNewConversation]);
 
@@ -515,9 +645,46 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     const isActive = isRunning || isWaiting;
 
     const selectedWsName = selectedWs !== null && workspaces[selectedWs] ? workspaces[selectedWs].workspaceName : '未选择工作区';
-    const selectedModelLabel = models.find(m => m.modelId === selectedModel)?.label || '默认模型';
-    // Render grouped exactly like the IDE picker; fall back to a single flat section.
-    const modelDisplayGroups: CascadeModelGroup[] = modelGroups.length ? modelGroups : (models.length ? [{ name: '', models }] : []);
+    const currentModelObj = models.find(m => m.modelId === selectedModel);
+    const hasLowQuota = Boolean(currentModelObj && typeof currentModelObj.quota === 'number' && currentModelObj.quota <= 0.15);
+    const hasRateLimitError = useMemo(() => {
+        const last = displaySteps[displaySteps.length - 1];
+        if (!last) return false;
+        const txt = JSON.stringify(last.errorMessage || '').toLowerCase();
+        return txt.includes('429') || txt.includes('quota') || txt.includes('exhausted') || txt.includes('rate');
+    }, [displaySteps]);
+
+    const handleCycleGuardMode = useCallback(async () => {
+        if (!autoAccept) {
+            setAutoAccept(true);
+            setAutoAcceptPolicy('smart');
+            await updatePermissionsConfig({ autoAccept: true, autoAcceptPolicy: 'smart' }).catch(() => {
+                setAutoAcceptState(true).catch(() => { });
+            });
+        } else if (autoAcceptPolicy === 'smart') {
+            setAutoAcceptPolicy('full');
+            await updatePermissionsConfig({ autoAccept: true, autoAcceptPolicy: 'full' }).catch(() => { });
+        } else {
+            setAutoAccept(false);
+            setAutoAcceptPolicy('smart');
+            await updatePermissionsConfig({ autoAccept: false, autoAcceptPolicy: 'smart' }).catch(() => {
+                setAutoAcceptState(false).catch(() => { });
+            });
+        }
+    }, [autoAccept, autoAcceptPolicy]);
+
+    const handleQuickRotateAccount = useCallback(async () => {
+        if (rotatingAccount) return;
+        setRotatingAccount(true);
+        try {
+            const res = await rotateOAuthAccount(true);
+            window.dispatchEvent(new CustomEvent('oauth-account-swapped', { detail: res }));
+        } catch {
+            onOpenAccounts?.();
+        } finally {
+            setRotatingAccount(false);
+        }
+    }, [rotatingAccount, onOpenAccounts]);
 
     return (
         <div className="flex-1 flex flex-col min-h-0">
@@ -571,20 +738,27 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                     )}
                     {/* Chat messages */}
                     <div ref={containerRef} onScroll={handleScroll} className="relative flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-5">
-                        {displaySteps.length === 0 ? (
-                            <div className="flex items-center justify-center h-full">
-                                <div className="text-center space-y-4">
-                                    <div className="flex items-center justify-center gap-3">
-                                        <Rocket className="h-8 w-8 text-muted-foreground/40" />
-                                        <h2 className="text-xl font-semibold text-foreground/80">Antigravity Deck</h2>
+                        {displaySteps.length === 0 && cliTurns.length === 0 ? (
+                            currentConvId ? (
+                                <div className="flex items-center justify-center h-full">
+                                    <div className="text-center space-y-2 text-muted-foreground">
+                                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary/70" />
+                                        <p className="text-sm">正在加载对话记录...</p>
                                     </div>
-                                    <p className="text-sm text-muted-foreground max-w-md">
-                                        {currentConvId ? '正在加载对话内容...' : '从左侧栏选择历史对话，或在下方输入框开启新对话'}
-                                    </p>
                                 </div>
-                            </div>
+                            ) : (
+                                <DoubaoWelcome
+                                    targetServer={targetServer}
+                                    onClearTargetServer={onClearTargetServer}
+                                    activeAccountLabel={activeAccountLabel}
+                                    onPickPrompt={(prompt) => {
+                                        setInput(prompt);
+                                        setTimeout(() => inputRef.current?.focus(), 40);
+                                    }}
+                                />
+                            )
                         ) : (
-                            <div className="max-w-4xl mx-auto">
+                            <div className="max-w-3xl mx-auto">
                                 {/* Load older steps trigger */}
                                 {baseIndex > 0 && (
                                     <div className="flex justify-center py-3 mb-2">
@@ -617,6 +791,31 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     }
                                     return <div key={`p-${gIdx}`} className={animClass}><ProcessingGroup steps={group.steps} cascadeId={activeCascadeId} lastTerminalIndex={lastTerminalIndex} /></div>;
                                 })}
+                                {cliTurns.map((turn) => (
+                                    <div key={turn.id} className="space-y-3 my-3">
+                                        <div className="flex justify-end">
+                                            <div className="max-w-[82%] rounded-2xl rounded-tr-sm px-4 py-2.5 bg-primary/10 border border-primary/15 text-sm whitespace-pre-wrap">
+                                                {turn.prompt}
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-start">
+                                            <div className="max-w-[92%] rounded-2xl rounded-tl-sm px-4 py-3 bg-card border border-border/60 text-sm space-y-1.5">
+                                                <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                                                    <Terminal className="h-3 w-3 text-amber-500" /> agy CLI 直连输出
+                                                </div>
+                                                {turn.pending ? (
+                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在通过 agy CLI 执行...
+                                                    </div>
+                                                ) : turn.error ? (
+                                                    <div className="text-xs text-destructive whitespace-pre-wrap">{turn.error}</div>
+                                                ) : (
+                                                    <div className="text-sm whitespace-pre-wrap leading-relaxed">{turn.reply || '（无文本返回）'}</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                                 {isRunning && <StreamingIndicator />}
                                 <div ref={bottomRef} className="h-4" />
                             </div>
@@ -634,8 +833,8 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                         )}
                     </div>
 
-                    {/* Input bar */}
-                    <div className="border-t border-border bg-background/80 backdrop-blur px-2 sm:px-4 py-2 sm:py-3"
+                    {/* Input bar (Doubao floating rounded composer) */}
+                    <div className="px-3 sm:px-6 pb-3 pt-1 bg-gradient-to-t from-background via-background/95 to-transparent"
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
@@ -646,61 +845,72 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 <div className="text-center space-y-2">
                                     <div className="flex items-center justify-center gap-2">
                                         <Camera className="h-6 w-6 text-primary/60" />
-                                        <p className="text-sm font-medium text-primary/80">松手以上传图片</p>
+                                        <p className="text-sm font-medium text-primary/80">松手以上传图片或日志/配置文件</p>
                                     </div>
                                 </div>
                             </div>
                         )}
-                        <div className="max-w-4xl mx-auto space-y-2">
+                        <div className="max-w-3xl mx-auto rounded-2xl border border-border/80 bg-card shadow-[0_6px_24px_rgba(0,0,0,0.06)] px-3 pt-2.5 pb-2 space-y-2">
                             {/* Pickers row */}
-                            <div className="flex items-center gap-1.5 sm:gap-2 text-xs flex-wrap">
-                                {/* Model picker */}
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground h-7 px-2 font-normal">
-                                            <span><Brain className="h-3.5 w-3.5" /></span>
-                                            <span className="truncate max-w-[200px] sm:max-w-[240px]">{selectedModelLabel}</span>
-                                            <ChevronDown className="h-3 w-3 opacity-50" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-72">
-                                        {modelDisplayGroups.map((group, gi) => (
-                                            <DropdownMenuGroup key={group.name || `g${gi}`}>
-                                                {/* IDE shows a flat list when there's a single group; only label real sub-groups. */}
-                                                {modelDisplayGroups.length > 1 && group.name && (
-                                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 py-1">{group.name}</DropdownMenuLabel>
-                                                )}
-                                                {group.models.map(m => (
-                                                    <DropdownMenuItem
-                                                        key={m.modelId || m.label}
-                                                        onClick={() => setSelectedModel(m.modelId)}
-                                                        className={cn('cursor-pointer flex items-center justify-between gap-2',
-                                                            m.modelId === selectedModel && 'text-primary')}
-                                                    >
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <span className="truncate">{m.label}</span>
-                                                            {m.tagTitle && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0" title={m.tagDescription || undefined}>{m.tagTitle}</Badge>}
-                                                            {m.isRecommended && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0"><Star className="w-2.5 h-2.5 text-amber-400" /></Badge>}
-                                                        </div>
-                                                        <div className="flex items-center gap-1.5 shrink-0">
-                                                            {m.supportsImages && <span className="text-[9px]"><ImageIcon className="h-3 w-3" /></span>}
-                                                            <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
-                                                                <div className="h-full rounded-full bg-emerald-500/70" style={{ width: `${Math.round(m.quota * 100)}%` }} />
-                                                            </div>
-                                                        </div>
-                                                    </DropdownMenuItem>
-                                                ))}
-                                                {gi < modelDisplayGroups.length - 1 && <DropdownMenuSeparator />}
-                                            </DropdownMenuGroup>
-                                        ))}
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                            <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                                {/* Doubao Tiered Model Picker */}
+                                <TieredModelPicker
+                                    models={models}
+                                    selectedModel={selectedModel}
+                                    onSelectModel={setSelectedModel}
+                                />
+
+                                {/* 3-mode Execution Guard Pill */}
+                                <button
+                                    type="button"
+                                    onClick={handleCycleGuardMode}
+                                    title="点击切换执行审批策略：智能放行（推荐） → 全自动 → 逐项确认"
+                                    className={cn(
+                                        'inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors cursor-pointer',
+                                        !autoAccept
+                                            ? 'bg-muted/50 text-muted-foreground border-border/60 hover:text-foreground'
+                                            : autoAcceptPolicy === 'full'
+                                                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                                : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                                    )}
+                                >
+                                    {!autoAccept ? <ShieldAlert className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                                    <span>{!autoAccept ? '逐项确认' : autoAcceptPolicy === 'full' ? '全自动' : '智能放行'}</span>
+                                </button>
+
+                                {/* Engine switch: Hub vs agy CLI quick fallback */}
+                                <button
+                                    type="button"
+                                    onClick={() => setUseAgyCli((v) => !v)}
+                                    title={detected ? '切换执行引擎：Antigravity Hub / agy CLI 直连' : 'Hub 离线，当前自动使用 agy CLI 直连'}
+                                    className={cn(
+                                        'inline-flex items-center gap-1 h-7 px-2 rounded-full text-[11px] border transition-colors cursor-pointer',
+                                        useAgyCli || !detected
+                                            ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                                            : 'bg-muted/40 text-muted-foreground border-border/50 hover:text-foreground'
+                                    )}
+                                >
+                                    <Terminal className="h-3 w-3" />
+                                    <span>{useAgyCli || !detected ? 'agy 直连' : 'Hub'}</span>
+                                </button>
+
+                                {(hasLowQuota || hasRateLimitError) && (
+                                    <button
+                                        type="button"
+                                        onClick={handleQuickRotateAccount}
+                                        disabled={rotatingAccount}
+                                        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35 hover:bg-amber-500/25 cursor-pointer"
+                                    >
+                                        {rotatingAccount ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />}
+                                        <span>额度紧张 · 一键换号</span>
+                                    </button>
+                                )}
 
                                 {/* Status indicator */}
                                 {isActive && (
-                                    <div className="flex items-center gap-1.5 text-[10px] text-purple-400/70 ml-1">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                                        {isWaiting ? (autoAccept ? '正在自动放行...' : '等待确认审批') : '运行中'}
+                                    <div className="flex items-center gap-1.5 text-[10px] text-primary ml-1">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                                        {isWaiting ? (autoAccept ? '处理审批...' : '等待你审批') : '执行中'}
                                     </div>
                                 )}
 
@@ -801,6 +1011,33 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                             {/* Token usage display */}
                             {showTokens && <TokenUsage cascadeId={activeCascadeId} />}
 
+                            {/* Uploaded files preview */}
+                            {(pendingFiles.length > 0 || uploadingFile || uploadNotice) && (
+                                <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-muted/30 border border-border/50 rounded-xl text-xs">
+                                    {pendingFiles.map((f) => (
+                                        <span key={f.path} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-background border border-border/60 max-w-[220px]">
+                                            <FileText className="h-3 w-3 text-primary shrink-0" />
+                                            <span className="truncate text-[11px]">{f.originalName}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setPendingFiles((prev) => prev.filter((x) => x.path !== f.path))}
+                                                className="text-muted-foreground hover:text-destructive cursor-pointer"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                    {uploadingFile && (
+                                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                                            <Loader2 className="h-3 w-3 animate-spin" /> 正在上传文件...
+                                        </span>
+                                    )}
+                                    {uploadNotice && (
+                                        <span className="text-[11px] text-destructive">{uploadNotice}</span>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Image preview — multi-image horizontal list */}
                             {pendingImages.length > 0 && (
                                 <div className="flex items-center gap-2 px-3 py-2 bg-muted/20 border border-border/30 rounded-lg overflow-x-auto">
@@ -833,8 +1070,15 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 </div>
                             )}
 
-                            {/* Hidden file input — supports multiple */}
-                            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImagePick} />
+                            {/* Hidden file input — supports images & logs/scripts/configs */}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*,.log,.txt,.sh,.py,.js,.ts,.tsx,.jsx,.json,.yaml,.yml,.conf,.ini,.md,.csv,.env,.sql,.xml"
+                                multiple
+                                className="hidden"
+                                onChange={handleImagePick}
+                            />
 
                             {/* Input area */}
                             <div className="relative flex items-end gap-2">
@@ -850,9 +1094,9 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="shrink-0 h-9 w-9 sm:h-11 sm:w-11 rounded-lg border border-border/50"
+                                    className="shrink-0 h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-border/50"
                                     onClick={() => fileInputRef.current?.click()}
-                                    title="添加图片"
+                                    title="上传图片或日志/配置文件"
                                 >
                                     <Paperclip className="h-4 w-4" />
                                 </Button>
@@ -874,8 +1118,8 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     onChange={e => handleInputChange(e.target.value)}
                                     onKeyDown={handleKeyDown}
                                     onPaste={handlePaste}
-                                    placeholder={currentConvId ? "输入消息继续对话..." : "输入消息开始新对话..."}
-                                    className="flex-1 resize-none min-h-[36px] sm:min-h-[44px] max-h-[200px] text-sm !py-[8px] sm:!py-[12px]"
+                                    placeholder={targetServer ? `向 ${targetServer.name} (${targetServer.ip}) 发送指令...` : currentConvId ? "输入消息继续对话..." : "问我任何服务器运维或代码问题..."}
+                                    className="flex-1 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 min-h-[36px] sm:min-h-[42px] max-h-[200px] text-sm !py-[8px]"
                                     rows={1}
                                     onInput={(e) => {
                                         const target = e.target as HTMLTextAreaElement;
@@ -884,15 +1128,15 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                     }}
                                 />
                                 {isRunning ? (
-                                    <Button onClick={handleCancel} variant="destructive" size="icon" className="h-9 w-9 sm:h-11 sm:w-11 rounded-lg shrink-0">
+                                    <Button onClick={handleCancel} variant="destructive" size="icon" className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl shrink-0">
                                         <Square className="h-4 w-4" />
                                     </Button>
                                 ) : (
                                     <Button
                                         onClick={handleSend}
-                                        disabled={(!input.trim() && pendingImages.length === 0) || sending}
+                                        disabled={(!input.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || sending}
                                         size="icon"
-                                        className="h-9 w-9 sm:h-11 sm:w-11 rounded-lg shrink-0"
+                                        className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl shrink-0"
                                     >
                                         <SendHorizontal className="h-4 w-4" />
                                     </Button>

@@ -8,6 +8,7 @@ const RuleListSchema = z.array(z.string().max(500)).max(200);
 
 const PermissionsUpdateSchema = z.object({
     autoAccept: z.boolean().optional(),
+    autoAcceptPolicy: z.enum(['smart', 'full']).optional(),
     cli: z.object({
         agentMode: z.enum(['', 'default', 'accept-edits', 'auto', 'plan']).optional(),
         toolPermission: z.enum(['request-review', 'proceed-in-sandbox', 'always-proceed', 'strict']).optional(),

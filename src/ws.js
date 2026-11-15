@@ -3,6 +3,7 @@
 
 const { lsConfig } = require('./config');
 const { getInstanceForCascade } = require('./poller');
+const { getEffectiveAuthKey, verifyAuthKey } = require('./auth-manager');
 
 const viewers = new Set();
 const globalViewers = new Set(); // clients that want ALL events (Live Logs)
@@ -11,14 +12,13 @@ const clientConvMap = new Map(); // Map<ws, convId> — per-client conversation 
 function setupWebSocket(wss, { ensureCached, stepCache }) {
     wss.on('connection', (ws, req) => {
         // Auth check for WebSocket (skip for localhost connections — same policy as HTTP)
-        const authKey = process.env.AUTH_KEY || '';
-        if (authKey) {
+        if (getEffectiveAuthKey()) {
             const ip = req.socket.remoteAddress || '';
             const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
             if (!isLocal) {
                 const url = new URL(req.url, 'http://localhost');
-                const key = url.searchParams.get('auth_key');
-                if (key !== authKey) {
+                const key = url.searchParams.get('auth_key') || '';
+                if (!verifyAuthKey(key)) {
                     ws.close(4401, 'Unauthorized');
                     return;
                 }

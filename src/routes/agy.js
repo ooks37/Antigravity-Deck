@@ -38,4 +38,30 @@ module.exports = function setupAgyRoutes(app) {
             res.status(500).json({ success: false, error: '执行 agy 手动更新失败' });
         }
     });
+
+    app.get('/api/agy/models', async (req, res) => {
+        try {
+            const result = await agyManager.getAgyModels();
+            const { statusCode = 200, ...payload } = result;
+            res.status(statusCode).json(payload);
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message || '读取 agy 模型失败', models: [] });
+        }
+    });
+
+    app.post('/api/agy/run', async (req, res) => {
+        try {
+            const { prompt, model, workspace, timeoutMs } = req.body || {};
+            const result = await agyManager.runAgyPrompt({
+                prompt,
+                model,
+                workspace,
+                timeoutMs: Number(timeoutMs) || 120000,
+            });
+            const { statusCode = 200, ...payload } = result;
+            res.status(statusCode).json(payload);
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message || 'agy 执行失败' });
+        }
+    });
 };

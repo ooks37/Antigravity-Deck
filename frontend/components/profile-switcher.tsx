@@ -36,8 +36,11 @@ import {
     Plus,
     RefreshCw,
     RotateCcw,
+    RotateCw,
     Save,
     Server,
+    ExternalLink,
+    Gauge,
     ShieldCheck,
     Trash2,
     Upload,
@@ -57,8 +60,13 @@ import {
     saveOAuthAccount,
     startAddAccountFlow,
     swapProfile,
-    useOAuthAccount,
+    switchOAuthAccount,
+    getOAuthQuotas,
+    rotateOAuthAccount,
+    startOAuthLoginUrl,
+    completeOAuthCallback,
     type OAuthAccountMeta,
+    type OAuthAccountQuota,
     type OAuthListResponse,
     type ProfileEntry,
     type ProfileEnvironment,
@@ -117,6 +125,13 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
     const [importJson, setImportJson] = useState('');
     const [importForce, setImportForce] = useState(false);
     const [importActivate, setImportActivate] = useState(true);
+
+    // OAuth live quota & Web Google OAuth modal
+    const [quotaMap, setQuotaMap] = useState<Record<string, OAuthAccountQuota>>({});
+    const [showWebOAuthDialog, setShowWebOAuthDialog] = useState(false);
+    const [webOAuthUrl, setWebOAuthUrl] = useState('');
+    const [webOAuthCallback, setWebOAuthCallback] = useState('');
+    const [webOAuthAlias, setWebOAuthAlias] = useState('');
 
     // Unified rename & confirm modals
     const [renameState, setRenameState] = useState<RenameModalState | null>(null);
@@ -190,14 +205,90 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
     }, [onAccountChanged]);
 
     // === OAuth Pool Handlers ===
+    const handleRefreshQuotas = async () => {
+        if (busyKey) return;
+        setBusyKey('oauth-quota');
+        setError(null);
+        try {
+            const resp = await getOAuthQuotas();
+            if ('accounts' in resp) {
+                const map: Record<string, OAuthAccountQuota> = {};
+                for (const q of resp.accounts) map[q.alias] = q;
+                setQuotaMap(map);
+                setNotice(`已刷新 ${resp.accounts.length} 个账号的模型剩余配额`);
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '刷新账号配额失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const handleRotateOAuth = async () => {
+        if (busyKey) return;
+        setBusyKey('oauth-rotate');
+        setError(null);
+        setNotice(null);
+        try {
+            const res = await rotateOAuthAccount(true);
+            setNotice(`已轮换切换至可用账号「${res.alias}」${res.email ? ` (${res.email})` : ''}${res.hubReloaded ? ' · 已静默重载后端引擎' : ''}`);
+            await fetchAll(true);
+            notifyChange('oauth-account-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '轮换切换账号失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const handleStartWebOAuth = async () => {
+        setBusyKey('oauth-login-url');
+        setError(null);
+        try {
+            const res = await startOAuthLoginUrl();
+            setWebOAuthUrl(res.authUrl);
+            setWebOAuthCallback('');
+            setWebOAuthAlias('');
+            setShowWebOAuthDialog(true);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '生成 Google 登录链接失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const handleCompleteWebOAuth = async () => {
+        if (!webOAuthCallback.trim()) {
+            setError('请粘贴 Google 授权跳转后的完整回调链接');
+            return;
+        }
+        setBusyKey('oauth-callback');
+        setError(null);
+        try {
+            const res = await completeOAuthCallback({
+                callbackUrl: webOAuthCallback.trim(),
+                alias: webOAuthAlias.trim() || undefined,
+                activate: true,
+            });
+            setShowWebOAuthDialog(false);
+            setNotice(`已通过 Google OAuth 登录并激活账号「${res.alias}」${res.email ? ` (${res.email})` : ''}`);
+            await fetchAll(true);
+            notifyChange('oauth-account-swapped', res);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '完成 Google 授权失败');
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
     const handleUseOAuth = async (acc: OAuthAccountMeta) => {
         if (busyKey || acc.isActive) return;
         setBusyKey(`oauth-use:${acc.alias}`);
         setError(null);
         setNotice(null);
         try {
-            const res = await useOAuthAccount(acc.alias);
-            setNotice(`已毫秒级切换 OAuth 账号至「${res.alias}」${res.email ? ` (${res.email})` : ''}${res.credManSynced ? ' · 已同步系统凭据' : ''}`);
+            const res = await switchOAuthAccount(acc.alias, { reloadHub: true, refreshIfExpired: true });
+            setNotice(`已切换 OAuth 账号至「${res.alias}」${res.email ? ` (${res.email})` : ''}${res.tokenRefreshed ? ' · 已自动续期' : ''}${res.hubReloaded ? ' · 后台引擎已静默重载' : ''}`);
             await fetchAll(true);
             notifyChange('oauth-account-swapped', res);
         } catch (err) {
@@ -525,7 +616,37 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
                                     </p>
                                 </div>
 
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs gap-1"
+                                        disabled={busyKey !== null || oauthAccounts.length === 0}
+                                        onClick={handleRefreshQuotas}
+                                    >
+                                        {busyKey === 'oauth-quota' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Gauge className="h-3 w-3" />}
+                                        刷新配额
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs gap-1"
+                                        disabled={busyKey !== null || oauthAccounts.length < 2}
+                                        onClick={handleRotateOAuth}
+                                    >
+                                        {busyKey === 'oauth-rotate' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />}
+                                        一键轮转
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs gap-1"
+                                        disabled={busyKey !== null}
+                                        onClick={handleStartWebOAuth}
+                                    >
+                                        {busyKey === 'oauth-login-url' ? <Loader2 className="h-3 w-3 animate-spin" /> : <ExternalLink className="h-3 w-3" />}
+                                        Google 网页登录
+                                    </Button>
                                     <Button
                                         size="sm"
                                         variant="outline"
@@ -624,6 +745,26 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
                                                             {acc.email || '未包含邮箱声明'}
                                                             {acc.name && acc.email && !acc.email.startsWith(acc.name) ? ` · ${acc.name}` : ''}
                                                         </p>
+                                                        {quotaMap[acc.alias] && (
+                                                            <div className="mt-1.5 flex items-center gap-2 text-[10px]">
+                                                                {quotaMap[acc.alias].error ? (
+                                                                    <span className="text-amber-500">配额检测失败: {quotaMap[acc.alias].error}</span>
+                                                                ) : (
+                                                                    <>
+                                                                        <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+                                                                            <div
+                                                                                className={`h-full rounded-full ${(quotaMap[acc.alias].avgQuota ?? 1) > 0.25 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                                                                style={{ width: `${Math.round((quotaMap[acc.alias].avgQuota ?? 0) * 100)}%` }}
+                                                                            />
+                                                                        </div>
+                                                                        <span className="text-muted-foreground font-mono">
+                                                                            均值 {Math.round((quotaMap[acc.alias].avgQuota ?? 0) * 100)}% · 最低 {Math.round((quotaMap[acc.alias].minQuota ?? 0) * 100)}%
+                                                                            {(quotaMap[acc.alias].exhaustedCount ?? 0) > 0 ? ` (${quotaMap[acc.alias].exhaustedCount} 项耗尽)` : ''}
+                                                                        </span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -973,6 +1114,55 @@ export function ProfileSwitcher({ detected = false, onAccountChanged }: ProfileS
                         <Button size="sm" onClick={handleSaveIdeProfile} disabled={busyKey === 'ide-create' || !ideSaveName.trim()}>
                             {busyKey === 'ide-create' && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
                             确认保存
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Web Google OAuth Dialog */}
+            <Dialog open={showWebOAuthDialog} onOpenChange={setShowWebOAuthDialog}>
+                <DialogContent className="sm:max-w-[500px]">
+                    <DialogHeader>
+                        <DialogTitle>Google 网页授权登录新账号</DialogTitle>
+                        <DialogDescription>
+                            1) 点击下方按钮在新窗口完成 Google 登录；2) 浏览器跳转到 localhost 无法访问页后，复制地址栏完整链接粘贴到下方即可完成绑定。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-1">
+                        {webOAuthUrl && (
+                            <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg border border-border/60 bg-muted/20">
+                                <span className="text-[11px] text-muted-foreground truncate font-mono flex-1">{webOAuthUrl}</span>
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1 shrink-0" asChild>
+                                    <a href={webOAuthUrl} target="_blank" rel="noopener noreferrer">
+                                        <ExternalLink className="h-3 w-3" /> 打开 Google 授权
+                                    </a>
+                                </Button>
+                            </div>
+                        )}
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium">粘贴回调地址栏 URL（必填）</label>
+                            <Input
+                                value={webOAuthCallback}
+                                onChange={(e) => setWebOAuthCallback(e.target.value)}
+                                placeholder="http://localhost:.../oauth-callback?code=...&state=..."
+                                className="font-mono text-xs"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium">账号别名（可选，留空自动按邮箱前缀生成）</label>
+                            <Input
+                                value={webOAuthAlias}
+                                onChange={(e) => setWebOAuthAlias(e.target.value)}
+                                placeholder="例如 work-backup"
+                                className="text-xs"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" size="sm" onClick={() => setShowWebOAuthDialog(false)}>取消</Button>
+                        <Button size="sm" onClick={handleCompleteWebOAuth} disabled={busyKey === 'oauth-callback' || !webOAuthCallback.trim()}>
+                            {busyKey === 'oauth-callback' && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                            完成绑定并切换
                         </Button>
                     </DialogFooter>
                 </DialogContent>

@@ -216,6 +216,20 @@ function makeMemorySettings(initial = {}) {
             assert.strictEqual(listed.accounts.length, 2);
             assert.strictEqual(JSON.stringify(listed).includes('SECRET_'), false);
 
+            // Switch on linux writes headless token fallback files for agy & language_server
+            const switchedLinux = await useOAuthAccount('主号', { ...opts, platform: 'linux' });
+            assert.strictEqual(switchedLinux.success, true);
+            assert.strictEqual(switchedLinux.headlessTokenSynced, true);
+            assert.strictEqual(JSON.stringify(switchedLinux).includes('SECRET_'), false);
+            for (const rel of [
+                ['.gemini', 'antigravity-cli', 'antigravity-oauth-token'],
+                ['.gemini', 'jetski-standalone-oauth-token'],
+                ['.gemini', 'antigravity', 'antigravity-oauth-token'],
+            ]) {
+                const blob = JSON.parse(fs.readFileSync(path.join(tmp, ...rel), 'utf8'));
+                assert.strictEqual(blob.token.access_token, 'SECRET_ACCESS_A');
+            }
+
             // Switch to work (test Windows CredMan hook on win32 too)
             const switched = await useOAuthAccount('work', { ...opts, platform: 'win32' });
             assert.strictEqual(switched.success, true);

@@ -262,7 +262,7 @@ export function PermissionsPanel() {
                             <div className="space-y-0.5">
                                 <span className="text-xs font-medium block">Deck 自动放行安全操作 (`autoAccept`)</span>
                                 <span className="text-[11px] text-muted-foreground block">
-                                    自动审批工作区内代码修改与只读访问确认；写命令或越界操作仍保持暂停等待确认。
+                                    自动审批日常检查与编辑确认；开启“智能防误触守卫”时，高危删除/停服/强制推送命令会自动暂停等你手动审批。
                                 </span>
                             </div>
                             <Switch
@@ -271,6 +271,47 @@ export function PermissionsPanel() {
                                 onCheckedChange={(checked) => applyUpdate({ autoAccept: checked }, checked ? '已开启 Deck 自动放行' : '已关闭 Deck 自动放行')}
                             />
                         </div>
+
+                        {permState.autoAccept && (
+                            <div className="flex items-center justify-between gap-4 rounded-lg border border-border/40 p-3 bg-muted/15">
+                                <div className="space-y-0.5">
+                                    <span className="text-xs font-medium block">高危命令安全守卫 (`smart` / `full`)</span>
+                                    <span className="text-[11px] text-muted-foreground block">
+                                        {permState.autoAcceptPolicy === 'full'
+                                            ? '当前为完全放行：所有终端命令与操作均自动放行，请谨慎使用。'
+                                            : '当前为智能放行（推荐）：仅拦截 rm -rf / systemctl stop / DROP TABLE 等高危指令并弹出审批卡片。'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 rounded-md border border-border/60 p-0.5 bg-background">
+                                    <button
+                                        type="button"
+                                        disabled={saving}
+                                        onClick={() => applyUpdate({ autoAcceptPolicy: 'smart' }, '已切换为智能安全守卫')}
+                                        className={cn(
+                                            'px-2 py-1 text-[11px] rounded cursor-pointer transition-colors',
+                                            permState.autoAcceptPolicy !== 'full'
+                                                ? 'bg-primary text-primary-foreground font-medium'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        )}
+                                    >
+                                        智能守卫
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={saving}
+                                        onClick={() => applyUpdate({ autoAcceptPolicy: 'full' }, '已切换为完全放行')}
+                                        className={cn(
+                                            'px-2 py-1 text-[11px] rounded cursor-pointer transition-colors',
+                                            permState.autoAcceptPolicy === 'full'
+                                                ? 'bg-rose-500 text-white font-medium'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        )}
+                                    >
+                                        完全放行
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Quick Presets */}
                         <div className="space-y-2">

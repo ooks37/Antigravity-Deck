@@ -4,6 +4,8 @@
 
 function setupRoutes(app) {
     require('./routes/system')(app);
+    require('./routes/auth')(app);
+    require('./routes/fleet')(app);
     require('./routes/proxy')(app);
     require('./routes/agy')(app);
     require('./routes/profiles')(app);

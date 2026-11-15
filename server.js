@@ -199,54 +199,43 @@ app.get('/api/ws-url', (req, res) => {
   res.json({ wsPort: Number(process.env.PORT || 3500) });
 });
 
-// Auth middleware — only active when AUTH_KEY env var is set
-const isNoAuth = process.argv.includes('--no-auth');
-const AUTH_KEY = isNoAuth ? '' : (process.env.AUTH_KEY || '');
-if (AUTH_KEY) {
-  console.log(`  🔒 Auth enabled (key length: ${AUTH_KEY.length})`);
-  app.use('/api', (req, res, next) => {
-    // Skip auth for public endpoints
-    if (req.path === '/ws-url' || req.path === '/status') {
-      return next();
-    }
-    
-    // Localhost bypass only if explicitly enabled (disabled by default for security)
-    const ip = req.ip || req.socket.remoteAddress || '';
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    const allowLocalBypass = process.env.ALLOW_LOCALHOST_BYPASS === 'true';
-    if (isLocal && allowLocalBypass) return next();
-
-    const key = req.headers['x-auth-key'] || req.query.auth_key;
-    
-    // Timing-safe comparison to prevent timing attacks
-    if (!key || key.length !== AUTH_KEY.length) {
-      return res.status(401).json({ error: 'Unauthorized — invalid or missing auth key' });
-    }
-    
-    try {
-      const keyBuffer = Buffer.from(key);
-      const authBuffer = Buffer.from(AUTH_KEY);
-      
-      if (!crypto.timingSafeEqual(keyBuffer, authBuffer)) {
-        return res.status(401).json({ error: 'Unauthorized — invalid or missing auth key' });
-      }
-    } catch (e) {
-      return res.status(401).json({ error: 'Unauthorized — invalid or missing auth key' });
-    }
-    
-    next();
-  });
-  
-  // Apply strict rate limiter to sensitive operations
-  app.use('/api/settings', strictLimiter);
-  app.use('/api/permissions', strictLimiter);
-  app.use('/api/launch-ide', strictLimiter);
-  app.use('/api/ide/restart', strictLimiter);
-  app.use('/api/kill-ide', strictLimiter);
-  app.use('/api/agy/update', strictLimiter);
+// Auth middleware — dynamic key via auth-manager (.auth-key + AUTH_KEY)
+const { getEffectiveAuthKey, verifyAuthKey, syncStartupAuthKey } = require('./src/auth-manager');
+const startupAuthKey = syncStartupAuthKey();
+if (startupAuthKey) {
+  console.log(`  🔒 Auth enabled (key length: ${startupAuthKey.length})`);
 } else {
   console.log('  ⚠️  No AUTH_KEY set — API is open (safe for local dev)');
 }
+
+app.use('/api', (req, res, next) => {
+  if (!getEffectiveAuthKey()) return next();
+  // Skip auth for public endpoints
+  if (req.path === '/ws-url' || req.path === '/status') {
+    return next();
+  }
+
+  // Localhost bypass only if explicitly enabled (disabled by default for security)
+  const ip = req.ip || req.socket.remoteAddress || '';
+  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  const allowLocalBypass = process.env.ALLOW_LOCALHOST_BYPASS === 'true';
+  if (isLocal && allowLocalBypass) return next();
+
+  const key = req.headers['x-auth-key'] || req.query.auth_key;
+  if (!verifyAuthKey(typeof key === 'string' ? key : '')) {
+    return res.status(401).json({ error: 'Unauthorized — invalid or missing auth key' });
+  }
+  next();
+});
+
+// Apply strict rate limiter to sensitive operations
+app.use('/api/settings', strictLimiter);
+app.use('/api/auth/password', strictLimiter);
+app.use('/api/permissions', strictLimiter);
+app.use('/api/launch-ide', strictLimiter);
+app.use('/api/ide/restart', strictLimiter);
+app.use('/api/kill-ide', strictLimiter);
+app.use('/api/agy/update', strictLimiter);
 
 // Routes & WebSocket
 setupRoutes(app);

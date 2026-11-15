@@ -35,7 +35,7 @@ export const UserMessage = memo(function UserMessage({ step, index }: { step: St
 
     return (
         <div className="flex justify-end mb-4">
-            <div className="max-w-[80%] group relative rounded-lg rounded-br-md px-4 py-3 bg-blue-600/20 border border-blue-500/20 overflow-hidden min-w-0">
+            <div className="max-w-[82%] group relative rounded-2xl rounded-tr-sm px-4 py-2.5 bg-primary/10 border border-primary/15 text-foreground overflow-hidden min-w-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
                 <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">你</span>
                     <span className="text-[10px] text-muted-foreground/40 opacity-0 group-hover:opacity-100">#{index + 1}</span>

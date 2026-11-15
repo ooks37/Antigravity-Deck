@@ -103,9 +103,9 @@ export const AgentResponse = memo(function AgentResponse({ step, index }: { step
 
     return (
         <div className="flex justify-start mb-4">
-            <div className="max-w-[85%] group relative rounded-lg rounded-bl-md px-4 py-3 bg-gradient-to-r from-purple-950/20 to-transparent border border-purple-500/10 overflow-hidden min-w-0">
+            <div className="max-w-[92%] group relative rounded-2xl rounded-tl-sm px-4 py-3 bg-card border border-border/60 overflow-hidden min-w-0 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
                 <div className="flex items-center gap-2 mb-1.5">
-                    <div className="w-5 h-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px]"><Bot className="h-2.5 w-2.5 text-purple-400" /></div>
+                    <div className="w-5 h-5 rounded-full bg-primary/15 flex items-center justify-center text-[10px]"><Bot className="h-3 w-3 text-primary" /></div>
                     <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">智能体</span>
                     <span className="text-[10px] text-muted-foreground/40 opacity-0 group-hover:opacity-100">#{index + 1}</span>
                 </div>

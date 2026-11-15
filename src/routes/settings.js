@@ -6,6 +6,7 @@ const { z } = require('zod');
 
 const SettingsSchema = z.object({
     autoAccept: z.boolean().optional(),
+    autoAcceptPolicy: z.enum(['smart', 'full']).optional(),
     defaultWorkspaceRoot: z.string().max(500).optional(),
     suggestedWorkspaceRoot: z.string().max(500).optional(),
     defaultModel: z.string().max(100).optional(),
@@ -36,6 +37,9 @@ module.exports = function setupSettingsRoutes(app) {
             const updated = saveSettings(validated);
             if (validated.autoAccept !== undefined) {
                 require('../auto-accept').setAutoAccept(validated.autoAccept);
+            }
+            if (validated.autoAcceptPolicy !== undefined) {
+                require('../auto-accept').setAutoAcceptPolicy(validated.autoAcceptPolicy);
             }
             console.log(`[*] Settings updated:`, JSON.stringify(updated));
             res.json(updated);

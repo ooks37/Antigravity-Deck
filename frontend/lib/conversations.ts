@@ -139,3 +139,42 @@ export function groupByProject(rows: ConvRow[]): {
     }
     return { byProject, loose };
 }
+
+export interface TimeBucketGroup {
+    label: '今天' | '昨天' | '7天内' | '更早';
+    rows: ConvRow[];
+}
+
+/** Group conversation rows into Doubao-style calendar buckets (newest first). */
+export function groupByTimeBucket(rows: ConvRow[]): TimeBucketGroup[] {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000;
+
+    const buckets: Record<TimeBucketGroup['label'], ConvRow[]> = {
+        '今天': [],
+        '昨天': [],
+        '7天内': [],
+        '更早': [],
+    };
+
+    for (const r of rows) {
+        const ts = r.lastModified ? new Date(r.lastModified).getTime() : 0;
+        if (!ts || Number.isNaN(ts)) {
+            buckets['更早'].push(r);
+        } else if (ts >= startOfToday) {
+            buckets['今天'].push(r);
+        } else if (ts >= startOfYesterday) {
+            buckets['昨天'].push(r);
+        } else if (ts >= startOfWeek) {
+            buckets['7天内'].push(r);
+        } else {
+            buckets['更早'].push(r);
+        }
+    }
+
+    return (['今天', '昨天', '7天内', '更早'] as const)
+        .filter((label) => buckets[label].length > 0)
+        .map((label) => ({ label, rows: buckets[label] }));
+}
