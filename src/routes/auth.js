@@ -19,20 +19,32 @@ const {
     deleteUser,
 } = require('../user-manager');
 
-function setSessionCookie(res, token) {
-    const maxAgeSec = Math.floor(SESSION_TTL_MS / 1000);
+const SHORT_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function isHttpsRequest(req) {
+    return Boolean(req?.secure || String(req?.get?.('x-forwarded-proto') || '').split(',')[0].trim() === 'https');
+}
+
+function setSessionCookie(res, token, persist = true, secure = false) {
     const parts = [
         `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
         'Path=/',
         'HttpOnly',
         'SameSite=Lax',
-        `Max-Age=${maxAgeSec}`,
     ];
+    if (persist) {
+        parts.push(`Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`);
+    }
+    if (secure) {
+        parts.push('Secure');
+    }
     res.setHeader('Set-Cookie', parts.join('; '));
 }
 
-function clearSessionCookie(res) {
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+function clearSessionCookie(res, secure = false) {
+    const parts = [`${SESSION_COOKIE_NAME}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+    if (secure) parts.push('Secure');
+    res.setHeader('Set-Cookie', parts.join('; '));
 }
 
 module.exports = function setupAuthRoutes(app) {
@@ -58,7 +70,7 @@ module.exports = function setupAuthRoutes(app) {
 
     app.post('/api/auth/login', (req, res) => {
         try {
-            const { username, password } = req.body || {};
+            const { username, password, remember } = req.body || {};
             if (!username || !password) {
                 return res.status(400).json({ error: '请输入用户名和密码' });
             }
@@ -66,9 +78,11 @@ module.exports = function setupAuthRoutes(app) {
             if (!user) {
                 return res.status(401).json({ error: '用户名、密码错误或账号已禁用' });
             }
-            const { token, expiresAt } = createSession(user.id);
-            setSessionCookie(res, token);
-            res.json({ user, token, expiresAt });
+            const persist = remember !== false;
+            const ttlMs = persist ? SESSION_TTL_MS : SHORT_SESSION_TTL_MS;
+            const { token, expiresAt } = createSession(user.id, ttlMs);
+            setSessionCookie(res, token, persist, isHttpsRequest(req));
+            res.json({ user, token, expiresAt, persistent: persist });
         } catch (e) {
             res.status(e.statusCode || 500).json({ error: e.message || '登录失败' });
         }
@@ -77,7 +91,7 @@ module.exports = function setupAuthRoutes(app) {
     app.post('/api/auth/logout', (req, res) => {
         const token = extractRequestToken(req);
         if (token) deleteSession(token);
-        clearSessionCookie(res);
+        clearSessionCookie(res, isHttpsRequest(req));
         res.json({ success: true });
     });
 

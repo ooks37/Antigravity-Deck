@@ -1006,10 +1006,14 @@ export async function fetchAuthMe(): Promise<AuthMeResponse> {
     return apiJson<AuthMeResponse>(`${API_BASE}/api/auth/me`, undefined, '获取登录状态失败');
 }
 
-export async function authLogin(username: string, password: string): Promise<{ user: UserProfile; token: string; expiresAt: string }> {
+export async function authLogin(
+    username: string,
+    password: string,
+    remember = true,
+): Promise<{ user: UserProfile; token: string; expiresAt: string; persistent?: boolean }> {
     return apiJson(`${API_BASE}/api/auth/login`, {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, remember }),
     }, '登录失败');
 }
 
