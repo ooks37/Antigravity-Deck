@@ -682,22 +682,23 @@ function createLsFallback(deps = {}) {
         candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'antigravity', 'memories'), 'global', '全局记忆'));
         candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'antigravity-cli', 'memories'), 'global', '全局记忆'));
 
-        // Also surface ~/.gemini/config/settings.json if it defines agent execution/permission rules
+        // Also surface ~/.gemini/config/settings.json as the active CLI execution/permission rule set
         const cliSettingsPath = path.join(homeDir, '.gemini', 'config', 'settings.json');
         const cliSettings = readJsonSafe(cliSettingsPath);
-        if (cliSettings && typeof cliSettings === 'object' && (cliSettings.agentMode || cliSettings.toolPermission || cliSettings.permissions)) {
+        if ((cliSettings && typeof cliSettings === 'object') || candidates.length === 0) {
+            const cfg = (cliSettings && typeof cliSettings === 'object') ? cliSettings : {};
             candidates.push({
                 memoryId: cliSettingsPath,
                 title: 'settings.json (CLI 全局执行与权限规则)',
                 scope: 'global',
                 source: 'CLI 配置',
                 textMemory: JSON.stringify({
-                    agentMode: cliSettings.agentMode || 'default',
-                    toolPermission: cliSettings.toolPermission || 'always-proceed',
-                    artifactReviewPolicy: cliSettings.artifactReviewPolicy || 'agent-decides',
-                    terminalAutoExecutionPolicy: cliSettings.terminalAutoExecutionPolicy || 'auto',
-                    allowNonWorkspaceAccess: cliSettings.allowNonWorkspaceAccess !== false,
-                    permissions: cliSettings.permissions || {},
+                    agentMode: cfg.agentMode || 'default',
+                    toolPermission: cfg.toolPermission || 'always-proceed',
+                    artifactReviewPolicy: cfg.artifactReviewPolicy || 'agent-decides',
+                    terminalAutoExecutionPolicy: cfg.terminalAutoExecutionPolicy || 'auto',
+                    allowNonWorkspaceAccess: cfg.allowNonWorkspaceAccess !== false,
+                    permissions: cfg.permissions || { allow: [], ask: [], deny: [] },
                 }, null, 2),
                 absolutePath: cliSettingsPath,
             });
@@ -706,7 +707,7 @@ function createLsFallback(deps = {}) {
         const seen = new Set();
         const memories = [];
         for (const rule of candidates) {
-            const key = realpathOrResolve(rule.absolutePath);
+            const key = fs.existsSync(rule.absolutePath) ? realpathOrResolve(rule.absolutePath) : rule.absolutePath;
             if (seen.has(key)) continue;
             seen.add(key);
             memories.push(rule);
