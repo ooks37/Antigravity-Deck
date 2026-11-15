@@ -1,9 +1,16 @@
 // === Workflow Routes ===
-// /api/workflows, /api/workflows/:name
+// /api/workflows, /api/workflows/:name — Maps workspace/global .md workflows,
+// agy CLI built-in slash workflows (/plan, /boost, /goal, etc.), and SKILL.md skills.
 
 const { getInstanceByName } = require('../detector');
-const { uriToFsPath } = require('./route-helpers');
-const { resolveWorkspacePathByName } = require('../ls-fallback');
+const { pathToFileUri, uriToFsPath } = require('./route-helpers');
+const { handleLsFallback, resolveWorkspacePathByName } = require('../ls-fallback');
+
+function formatLabel(name) {
+    const clean = String(name || '').trim();
+    if (!clean) return '';
+    return clean.charAt(0).toUpperCase() + clean.slice(1).replace(/[-_]/g, ' ');
+}
 
 module.exports = function setupWorkflowsRoutes(app) {
     function resolveWsPath(wsName) {
@@ -18,99 +25,100 @@ module.exports = function setupWorkflowsRoutes(app) {
         return resolveWorkspacePathByName('');
     }
 
-    // GET /api/workflows — list all available workflow files
-    app.get('/api/workflows', (req, res) => {
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
+    function buildLsBody(wsName) {
+        const wsPath = resolveWsPath(wsName);
+        return wsPath ? { workspaceUris: [pathToFileUri(wsPath)] } : {};
+    }
 
-        const workflows = [];
+    // GET /api/workflows — list all available slash workflows & skills mapped for agy CLI
+    app.get('/api/workflows', async (req, res) => {
+        try {
+            const body = buildLsBody(req.query.workspace);
+            const [wfRes, skillRes] = await Promise.all([
+                handleLsFallback('GetAllWorkflows', body),
+                handleLsFallback('GetAllSkills', body),
+            ]);
 
-        // Parse YAML frontmatter description from .md content
-        function parseDescription(content) {
-            const fm = content.match(/^---\s*\n([\s\S]*?)\n---/);
-            if (fm) {
-                const descMatch = fm[1].match(/description:\s*(.+)/);
-                if (descMatch) return descMatch[1].trim();
+            const workflows = [];
+            const seenSlashes = new Set();
+
+            for (const w of wfRes?.workflows || []) {
+                const name = String(w.name || '').trim();
+                if (!name) continue;
+                const slash = name.startsWith('/') ? name : `/${name}`;
+                if (seenSlashes.has(slash.toLowerCase())) continue;
+                seenSlashes.add(slash.toLowerCase());
+                const source = w.scope === 'workspace'
+                    ? 'workspace'
+                    : (w.isBuiltin || w.scope === 'builtin' ? 'builtin' : 'global');
+                workflows.push({
+                    slash,
+                    label: formatLabel(name.replace(/^\//, '')),
+                    description: w.description || '',
+                    source,
+                });
             }
-            // Fallback: first heading
-            const heading = content.match(/^#\s+(.+)/m);
-            return heading ? heading[1].trim() : '';
-        }
 
-        function scanDir(dirPath, source) {
-            if (!fs.existsSync(dirPath)) return;
-            try {
-                const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.md'));
-                for (const file of files) {
-                    try {
-                        const content = fs.readFileSync(path.join(dirPath, file), 'utf-8');
-                        const name = path.basename(file, '.md');
-                        if (!workflows.some(w => w.slash === `/${name}`)) {
-                            workflows.push({
-                                slash: `/${name}`,
-                                label: name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, ' '),
-                                description: parseDescription(content),
-                                source,
-                            });
-                        }
-                    } catch { /* skip unreadable files */ }
-                }
-            } catch { /* dir not readable */ }
-        }
+            for (const s of skillRes?.skills || []) {
+                const name = String(s.name || '').trim();
+                if (!name) continue;
+                const slash = name.startsWith('/') ? name : `/${name}`;
+                if (seenSlashes.has(slash.toLowerCase())) continue;
+                seenSlashes.add(slash.toLowerCase());
+                workflows.push({
+                    slash,
+                    label: formatLabel(name.replace(/^\//, '')),
+                    description: s.description || '',
+                    source: s.scope === 'workspace' ? 'workspace' : 'skill',
+                });
+            }
 
-        // 1. Scan global workflows (both desktop Antigravity and headless Antigravity CLI)
-        for (const globalDir of [
-            path.join(os.homedir(), '.gemini', 'antigravity', 'global_workflows'),
-            path.join(os.homedir(), '.gemini', 'antigravity-cli', 'global_workflows'),
-            path.join(os.homedir(), '.gemini', 'antigravity-cli', 'builtin', 'workflows'),
-        ]) {
-            scanDir(globalDir, 'global');
+            const rank = { workspace: 0, global: 1, builtin: 2, skill: 3 };
+            workflows.sort((a, b) => (rank[a.source] ?? 9) - (rank[b.source] ?? 9) || a.slash.localeCompare(b.slash));
+            res.json(workflows);
+        } catch (err) {
+            res.status(500).json({ error: err.message });
         }
-
-        // 2. Scan per-workspace workflows (support both LS instance and CLI workspace fallback)
-        const wsPath = resolveWsPath(req.query.workspace);
-        if (wsPath) {
-            scanDir(path.join(wsPath, '.agent', 'workflows'), 'workspace');
-            scanDir(path.join(wsPath, '.agents', 'workflows'), 'workspace');
-        }
-
-        workflows.sort((a, b) => a.slash.localeCompare(b.slash));
-        res.json(workflows);
     });
 
-    // GET /api/workflows/:name — read full content of a workflow file
-    app.get('/api/workflows/:name', (req, res) => {
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
+    // GET /api/workflows/:name — read full content of a workflow or skill
+    app.get('/api/workflows/:name', async (req, res) => {
+        try {
+            const name = req.params.name.replace(/[^a-zA-Z0-9._-]/g, '');
+            if (!name) return res.status(400).json({ error: 'Invalid workflow name' });
 
-        const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, ''); // sanitize
-        if (!name) return res.status(400).json({ error: 'Invalid workflow name' });
+            const body = buildLsBody(req.query.workspace);
+            const [wfRes, skillRes] = await Promise.all([
+                handleLsFallback('GetAllWorkflows', body),
+                handleLsFallback('GetAllSkills', body),
+            ]);
 
-        // Check workspace-specific first, then global
-        const wsPath = resolveWsPath(req.query.workspace);
-        if (wsPath) {
-            for (const rel of [path.join('.agent', 'workflows'), path.join('.agents', 'workflows')]) {
-                const wsFile = path.join(wsPath, rel, `${name}.md`);
-                if (fs.existsSync(wsFile)) {
-                    return res.json({ name, content: fs.readFileSync(wsFile, 'utf-8'), source: 'workspace' });
-                }
+            const lower = name.toLowerCase();
+            const matchedWf = (wfRes?.workflows || []).find((w) => String(w.name || '').toLowerCase() === lower);
+            if (matchedWf) {
+                return res.json({
+                    name: matchedWf.name,
+                    description: matchedWf.description || '',
+                    content: matchedWf.content || '',
+                    source: matchedWf.scope || (matchedWf.isBuiltin ? 'builtin' : 'global'),
+                    path: matchedWf.path || null,
+                });
             }
-        }
 
-        // Global
-        for (const globalDir of [
-            path.join(os.homedir(), '.gemini', 'antigravity', 'global_workflows'),
-            path.join(os.homedir(), '.gemini', 'antigravity-cli', 'global_workflows'),
-            path.join(os.homedir(), '.gemini', 'antigravity-cli', 'builtin', 'workflows'),
-        ]) {
-            const globalFile = path.join(globalDir, `${name}.md`);
-            if (fs.existsSync(globalFile)) {
-                return res.json({ name, content: fs.readFileSync(globalFile, 'utf-8'), source: 'global' });
+            const matchedSkill = (skillRes?.skills || []).find((s) => String(s.name || '').toLowerCase() === lower);
+            if (matchedSkill) {
+                return res.json({
+                    name: matchedSkill.name,
+                    description: matchedSkill.description || '',
+                    content: matchedSkill.content || '',
+                    source: matchedSkill.scope === 'workspace' ? 'workspace' : 'skill',
+                    path: matchedSkill.path || null,
+                });
             }
-        }
 
-        res.status(404).json({ error: `Workflow "${name}" not found` });
+            res.status(404).json({ error: `Workflow "${name}" not found` });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
     });
 };

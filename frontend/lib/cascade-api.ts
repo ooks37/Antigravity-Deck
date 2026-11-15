@@ -379,12 +379,12 @@ export async function getWorkspaceFile(workspace: string, file: string): Promise
     return res.json();
 }
 
-// === Workflows (slash commands from Antigravity IDE) ===
+// === Workflows (slash commands from Antigravity IDE / agy CLI) ===
 export interface WorkflowItem {
     slash: string;
     label: string;
     description: string;
-    source: 'global' | 'workspace';
+    source: 'global' | 'workspace' | 'builtin' | 'skill';
 }
 
 export async function fetchWorkflows(workspace?: string): Promise<WorkflowItem[]> {

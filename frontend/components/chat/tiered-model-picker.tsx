@@ -48,8 +48,8 @@ export function deriveQuotaPools(models: CascadeModel[], activeAccount?: ActiveM
         return activeAccount!.pools;
     }
     const defs = [
-        { id: 'gemini-pro', label: 'Gemini Pro', shortLabel: 'G·Pro', match: (s: string) => /gemini/i.test(s) && !/flash/i.test(s) },
-        { id: 'gemini-flash', label: 'Gemini Flash', shortLabel: 'G·Flash', match: (s: string) => /gemini/i.test(s) && /flash/i.test(s) },
+        { id: 'gemini-pro', label: 'Gemini Argon / Pro', shortLabel: 'Argon', match: (s: string) => /gemini|argon|orchestrator/i.test(s) && /pro|argon|orchestrator/i.test(s) && !/flash|hydrogen/i.test(s) },
+        { id: 'gemini-flash', label: 'Gemini Hydrogen / Flash', shortLabel: 'Hydro', match: (s: string) => /gemini|hydrogen/i.test(s) && /flash|hydrogen/i.test(s) },
         { id: 'claude', label: 'Claude', shortLabel: 'Claude', match: (s: string) => /claude/i.test(s) },
         { id: 'gpt', label: 'GPT', shortLabel: 'GPT', match: (s: string) => /gpt/i.test(s) },
     ];

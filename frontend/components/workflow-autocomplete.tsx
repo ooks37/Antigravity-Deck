@@ -89,7 +89,16 @@ export const WorkflowAutocomplete = forwardRef<WorkflowAutocompleteHandle, Workf
                         <span className="font-mono text-sm font-medium text-primary shrink-0">{w.slash}</span>
                         <span className="text-xs text-muted-foreground truncate">{w.description || w.label}</span>
                         {w.source === 'workspace' && (
-                            <span className="ml-auto text-[9px] text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded shrink-0">工作区</span>
+                            <span className="ml-auto text-[9px] text-sky-500/80 bg-sky-500/10 px-1.5 py-0.5 rounded shrink-0">工作区</span>
+                        )}
+                        {w.source === 'builtin' && (
+                            <span className="ml-auto text-[9px] text-violet-500/80 bg-violet-500/10 px-1.5 py-0.5 rounded shrink-0">CLI 命令</span>
+                        )}
+                        {w.source === 'skill' && (
+                            <span className="ml-auto text-[9px] text-emerald-500/80 bg-emerald-500/10 px-1.5 py-0.5 rounded shrink-0">技能</span>
+                        )}
+                        {w.source === 'global' && (
+                            <span className="ml-auto text-[9px] text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded shrink-0">全局</span>
                         )}
                     </div>
                 ))}

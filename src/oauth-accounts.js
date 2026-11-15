@@ -6,7 +6,9 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
 const https = require('https');
+const net = require('net');
 const { spawn } = require('child_process');
 
 const PS_PATH = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -15,13 +17,12 @@ const ALIAS_PATTERN = /^[a-zA-Z0-9_\u4e00-\u9fa5-]+$/;
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v1/userinfo';
-const CLOUDCODE_MODELS_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels';
-const CLOUDCODE_LOAD_ASSIST_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist';
 const DEFAULT_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 
 const pendingOAuthFlows = new Map(); // state -> { codeVerifier, redirectUri, createdAt }
 const quotaCache = new Map(); // alias -> { fetchedAt, ... }
 const quotaInFlight = new Map(); // alias -> Promise<summary>
+let persistedCacheLoadedForPath = null;
 
 function resolvePaths(opts = {}) {
     const homeDir = opts.homeDir || os.homedir();
@@ -33,6 +34,7 @@ function resolvePaths(opts = {}) {
     const cliTokenPath = path.join(geminiDir, 'antigravity-cli', 'antigravity-oauth-token');
     const jetskiTokenPath = path.join(geminiDir, 'jetski-standalone-oauth-token');
     const ideTokenPath = path.join(geminiDir, 'antigravity', 'antigravity-oauth-token');
+    const quotaCachePath = path.join(geminiDir, 'antigravity-deck', 'quota-cache.json');
     return {
         homeDir,
         geminiDir,
@@ -43,7 +45,33 @@ function resolvePaths(opts = {}) {
         cliTokenPath,
         jetskiTokenPath,
         ideTokenPath,
+        quotaCachePath,
     };
+}
+
+function loadPersistedQuotaCache(paths) {
+    if (!paths?.quotaCachePath || persistedCacheLoadedForPath === paths.quotaCachePath) return;
+    persistedCacheLoadedForPath = paths.quotaCachePath;
+    const diskData = readJsonSafe(paths.quotaCachePath);
+    if (!diskData || typeof diskData !== 'object') return;
+    for (const [k, v] of Object.entries(diskData)) {
+        if (v && typeof v === 'object' && !quotaCache.has(k)) {
+            quotaCache.set(k, v);
+        }
+    }
+}
+
+function savePersistedQuotaCache(paths) {
+    if (!paths?.quotaCachePath) return;
+    try {
+        const serialized = {};
+        for (const [k, v] of quotaCache.entries()) {
+            if (k && k !== '__active__' && v && typeof v === 'object') {
+                serialized[k] = v;
+            }
+        }
+        writeSecretJsonFile(paths.quotaCachePath, serialized);
+    } catch { /* non-fatal */ }
 }
 
 function validateAlias(alias) {
@@ -444,23 +472,23 @@ let lastBackgroundWarmAt = 0;
 
 function listOAuthAccounts(opts = {}) {
     const paths = resolvePaths(opts);
+    loadPersistedQuotaCache(paths);
     const status = getCurrentOAuthStatusSync(opts);
     const accounts = listAccountFiles(paths);
     let activeAlias = null;
     const activeLower = status.activeEmail ? status.activeEmail.toLowerCase() : null;
-    let hasUncached = false;
     const enriched = accounts.map((acc) => {
         const isActive = Boolean(activeLower && acc.email && acc.email.toLowerCase() === activeLower);
         if (isActive && !activeAlias) activeAlias = acc.alias;
         const cachedQuota = formatCachedQuota(quotaCache.get(acc.alias) || null, false);
-        if (!cachedQuota) hasUncached = true;
         return { ...acc, isActive, quota: cachedQuota };
     });
-    // Non-blocking background warmup on live server when any account lacks cached quota
-    if (hasUncached && (!opts || Object.keys(opts).length === 0) && Date.now() - lastBackgroundWarmAt > 60000) {
+    // Non-blocking background sync ONLY for the single currently active account via local official binary
+    const activeItem = enriched.find((a) => a.isActive);
+    if (activeItem && !activeItem.quota && (!opts || Object.keys(opts).length === 0) && Date.now() - lastBackgroundWarmAt > 60000) {
         lastBackgroundWarmAt = Date.now();
         setImmediate(() => {
-            warmAllAccountQuotas().catch(() => {});
+            getActiveAccountQuotaSummary({ includeRaw: true }).catch(() => {});
         });
     }
     return {
@@ -513,22 +541,6 @@ function discoverOAuthClientConfig(opts = {}) {
             };
         }
     } catch { /* ignore in isolated tests */ }
-
-    // Best-effort discovery from local 9router/provider registry on VPS if present
-    const localRegistryPaths = [
-        '/www/wwwroot/9router/app/open-sse/providers/registry/antigravity.js',
-    ];
-    for (const regPath of localRegistryPaths) {
-        try {
-            if (!fs.existsSync(regPath)) continue;
-            const text = fs.readFileSync(regPath, 'utf8');
-            const idMatch = text.match(/clientId\s*:\s*['"]([^'"]+\.apps\.googleusercontent\.com)['"]/);
-            const secMatch = text.match(/clientSecret\s*:\s*['"]([^'"]+)['"]/);
-            if (idMatch && secMatch) {
-                return { clientId: idMatch[1], clientSecret: secMatch[1] };
-            }
-        } catch { /* ignore */ }
-    }
     return null;
 }
 
@@ -778,8 +790,8 @@ function isInternalOrNoiseModel(id, info) {
 }
 
 /**
- * Group models into independent quota pools (Gemini / Gemini Pro / Gemini Flash / Claude / GPT)
- * since CloudCode tracks separate rate-limit buckets per model family rather than a single global pool.
+ * Group models into independent quota pools (Gemini Argon/Pro, Gemini Hydrogen/Flash, Claude, GPT)
+ * matching the official local language_server GetCascadeModelConfigData rate-limit buckets.
  */
 function buildQuotaPools(models = []) {
     const normalizeItem = (m) => {
@@ -807,7 +819,7 @@ function buildQuotaPools(models = []) {
         } else if (hay.includes('gpt') || hay.includes('openai')) {
             gpt.push(m);
         } else if (hay.includes('gemini') || hay.includes('argon') || hay.includes('hydrogen') || hay.includes('orchestrator')) {
-            if (/pro|argon|hydrogen|orchestrator/i.test(hay) && !/flash/i.test(hay)) {
+            if (/pro|argon|orchestrator/i.test(hay) && !/flash|hydrogen/i.test(hay)) {
                 geminiPro.push(m);
             } else {
                 geminiFlash.push(m);
@@ -831,9 +843,22 @@ function buildQuotaPools(models = []) {
         };
     };
 
+    const hasArgon = geminiPro.some((x) => /argon|orchestrator/i.test(`${x.id} ${x.label}`));
+    const hasHydrogen = geminiFlash.some((x) => /hydrogen/i.test(`${x.id} ${x.label}`));
+
     const pools = [];
-    const proPool = summarizeBucket('gemini-pro', 'Gemini Pro', 'G-Pro', geminiPro);
-    const flashPool = summarizeBucket('gemini-flash', 'Gemini Flash', 'G-Flash', geminiFlash);
+    const proPool = summarizeBucket(
+        'gemini-pro',
+        hasArgon ? 'Gemini Argon' : 'Gemini Pro',
+        hasArgon ? 'Argon' : 'G-Pro',
+        geminiPro,
+    );
+    const flashPool = summarizeBucket(
+        'gemini-flash',
+        hasHydrogen ? 'Gemini Hydrogen' : 'Gemini Flash',
+        hasHydrogen ? 'Hydro' : 'G-Flash',
+        geminiFlash,
+    );
 
     if (proPool && flashPool && Math.abs(proPool.remainingFraction - flashPool.remainingFraction) > 0.015) {
         pools.push(proPool, flashPool);
@@ -945,84 +970,307 @@ function classifyAccountTier({ loadCodeAssist = null, modelsMap = {}, agyModels 
     };
 }
 
+function findOfficialLanguageServerBinary(opts = {}) {
+    if (opts.lsBinaryPath && fs.existsSync(opts.lsBinaryPath)) return opts.lsBinaryPath;
+    const homeDir = opts.homeDir || os.homedir();
+    const candidates = process.platform === 'win32'
+        ? [
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'resources', 'app', 'extensions', 'antigravity', 'bin', 'language_server_windows_x64.exe'),
+            path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Antigravity', 'resources', 'app', 'extensions', 'antigravity', 'bin', 'language_server_windows_x64.exe'),
+            path.join(homeDir, '.gemini', 'antigravity-cli', 'bin', 'language_server_windows_x64.exe'),
+        ]
+        : process.platform === 'darwin'
+        ? [
+            '/Applications/Antigravity.app/Contents/Resources/app/extensions/antigravity/bin/language_server_macos_arm',
+            '/Applications/Antigravity.app/Contents/Resources/app/extensions/antigravity/bin/language_server_macos_x64',
+        ]
+        : [
+            '/opt/antigravity/Antigravity-x64/resources/bin/language_server',
+            '/opt/antigravity/resources/bin/language_server',
+            '/usr/lib/antigravity/resources/bin/language_server',
+            path.join(homeDir, '.gemini', 'antigravity-cli', 'bin', 'language_server'),
+        ];
+    for (const p of candidates) {
+        if (p && fs.existsSync(p)) return p;
+    }
+    return null;
+}
+
+function allocateLoopbackPort() {
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.unref();
+        srv.on('error', reject);
+        srv.listen(0, '127.0.0.1', () => {
+            const addr = srv.address();
+            const port = addr && typeof addr === 'object' ? addr.port : 0;
+            srv.close(() => resolve(port));
+        });
+    });
+}
+
+function localLsRpcRequest(port, csrfToken, method, body = {}, timeoutMs = 4000) {
+    return new Promise((resolve, reject) => {
+        const payload = JSON.stringify(body || {});
+        const req = http.request({
+            hostname: '127.0.0.1',
+            port,
+            path: `/exa.language_server_pb.LanguageServerService/${method}`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload),
+                'Connect-Protocol-Version': '1',
+                'x-codeium-csrf-token': csrfToken,
+            },
+            timeout: timeoutMs,
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end', () => {
+                const text = Buffer.concat(chunks).toString('utf8');
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    try {
+                        resolve(JSON.parse(text));
+                    } catch {
+                        reject(new Error(`Invalid JSON from local language_server ${method}`));
+                    }
+                } else {
+                    reject(new Error(`Local language_server ${method} HTTP ${res.statusCode}`));
+                }
+            });
+        });
+        req.on('timeout', () => req.destroy(new Error(`Local language_server ${method} timeout`)));
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+    });
+}
+
+/**
+ * Purely local mapping of the official Antigravity language_server binary on 127.0.0.1.
+ * Never makes direct third-party HTTP calls to CloudCode APIs from Node.js.
+ */
+async function probeOfficialLanguageServer(opts = {}) {
+    if (typeof opts.mockOfficialProbe === 'function') {
+        return opts.mockOfficialProbe(opts);
+    }
+
+    // 1. Reuse active local language_server instance if IDE hub is running
+    try {
+        const { getFirstActiveInstance } = require('./config');
+        const { callApi } = require('./api');
+        const inst = getFirstActiveInstance();
+        if (inst) {
+            const [modelData, statusData] = await Promise.allSettled([
+                callApi('GetCascadeModelConfigData', {}, inst),
+                callApi('GetUserStatus', {}, inst),
+            ]);
+            const clientModelConfigs = modelData.status === 'fulfilled'
+                ? (modelData.value?.clientModelConfigs || [])
+                : [];
+            const userStatus = statusData.status === 'fulfilled'
+                ? (statusData.value?.userStatus || null)
+                : null;
+            if (clientModelConfigs.length > 0) {
+                return { clientModelConfigs, userStatus, source: 'active-ls' };
+            }
+        }
+    } catch { /* fallback to ephemeral standalone language_server probe */ }
+
+    // 2. Spawn the official local language_server binary on 127.0.0.1 briefly and query local RPC
+    const lsBin = findOfficialLanguageServerBinary(opts);
+    if (!lsBin) {
+        return { clientModelConfigs: [], userStatus: null, source: 'agy-cli-only' };
+    }
+
+    const paths = resolvePaths(opts);
+    const httpPort = await allocateLoopbackPort();
+    const csrfToken = crypto.randomUUID();
+    const child = spawn(lsBin, [
+        '-headless=true',
+        '-standalone=true',
+        '-cloud_code_endpoint=https://daily-cloudcode-pa.googleapis.com',
+        `-gemini_dir=${paths.geminiDir}`,
+        '-app_data_dir=antigravity-cli',
+        `-http_server_port=${httpPort}`,
+        `-csrf_token=${csrfToken}`,
+    ], {
+        env: {
+            ...process.env,
+            HOME: paths.homeDir,
+            USERPROFILE: paths.homeDir,
+        },
+        stdio: 'ignore',
+        windowsHide: true,
+    });
+
+    try {
+        const deadline = Date.now() + 7000;
+        let modelResp = null;
+        while (Date.now() < deadline) {
+            if (child.exitCode !== null) break;
+            try {
+                modelResp = await localLsRpcRequest(httpPort, csrfToken, 'GetCascadeModelConfigData', {}, 2500);
+                if (modelResp && Array.isArray(modelResp.clientModelConfigs)) break;
+            } catch {
+                await new Promise((r) => setTimeout(r, 200));
+            }
+        }
+        let userStatus = null;
+        if (modelResp) {
+            try {
+                const statusResp = await localLsRpcRequest(httpPort, csrfToken, 'GetUserStatus', {}, 2000);
+                userStatus = statusResp?.userStatus || null;
+            } catch { /* optional */ }
+        }
+        return {
+            clientModelConfigs: modelResp?.clientModelConfigs || [],
+            userStatus,
+            source: 'local-language-server',
+        };
+    } finally {
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        setTimeout(() => {
+            try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ }
+        }, 400).unref();
+    }
+}
+
+function deriveCliSlugsFromLabel(label) {
+    const clean = String(label || '').trim();
+    if (!clean) return [];
+    const normalized = clean
+        .toLowerCase()
+        .replace(/[()]/g, ' ')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+    const slugs = new Set([normalized]);
+    if (normalized === 'orchestrator-argon' || /orchestrator.*argon/i.test(clean)) {
+        slugs.add('gemini-pro-orchestrator-g1-pro');
+    }
+    if (normalized.endsWith('-thinking')) {
+        slugs.add(normalized.replace(/-thinking$/, ''));
+    } else if (/^claude-(opus|sonnet)-/.test(normalized)) {
+        slugs.add(`${normalized}-thinking`);
+    }
+    return Array.from(slugs);
+}
+
 async function fetchAccountQuota(alias, opts = {}) {
     const paths = resolvePaths(opts);
+    loadPersistedQuotaCache(paths);
     const isDirectActive = alias === '__active__';
     const found = isDirectActive ? null : findAccountFile(paths, alias);
     if (!isDirectActive && !found) {
         throw new Error(`未找到已保存的 OAuth 账号 "${alias}"`);
     }
-    let raw = isDirectActive
+    const raw = isDirectActive
         ? await readActiveCredentialObject(opts)
         : readJsonSafe(found.targetPath);
     if (!raw) {
         throw new Error(`未找到可用的 OAuth 凭据 "${alias}"`);
     }
     normalizeCredentialData(raw);
-    let meta = extractAccountMeta(raw);
+    const meta = extractAccountMeta(raw);
 
-    if (meta.isExpired || !meta.hasAccessToken) {
-        const refreshed = await refreshCredentialObject(raw, opts);
-        if (refreshed.refreshed) {
-            raw = refreshed.data;
-            meta = extractAccountMeta(raw);
-            if (found?.targetPath) {
-                writeSecretJsonFile(found.targetPath, raw);
+    const status = getCurrentOAuthStatusSync(opts);
+    const isCurrentActive = isDirectActive
+        || Boolean(status.activeEmail && meta.email && status.activeEmail.toLowerCase() === meta.email.toLowerCase());
+
+    // Never send background HTTP requests for inactive accounts; serve local persisted cache
+    if (!isCurrentActive && !opts.mockOfficialProbe) {
+        const existingCached = quotaCache.get(found.cleanAlias);
+        if (existingCached) {
+            return opts.includeRaw ? existingCached : formatCachedQuota(existingCached, false);
+        }
+        return {
+            alias: found.cleanAlias,
+            email: meta.email,
+            fetchedAt: null,
+            avgQuota: null,
+            minQuota: null,
+            exhaustedCount: 0,
+            totalModels: 0,
+            tierId: 'cached',
+            tierLabel: '切换后读取',
+            pools: [],
+            models: [],
+        };
+    }
+
+    let agyModels = [];
+    try {
+        const agyRes = await require('./agy-manager').getAgyModels();
+        agyModels = Array.isArray(agyRes?.models) ? agyRes.models : [];
+    } catch { /* optional in isolated tests */ }
+
+    const official = await probeOfficialLanguageServer(opts);
+    const clientModelConfigs = Array.isArray(official?.clientModelConfigs) ? official.clientModelConfigs : [];
+    const userStatus = official?.userStatus || null;
+
+    const rawModelsMap = {};
+    const models = [];
+
+    if (clientModelConfigs.length > 0) {
+        const agySlugSet = new Set(agyModels.map((m) => String(m.id || '').toLowerCase()).filter(Boolean));
+        for (const c of clientModelConfigs) {
+            const candidateSlugs = deriveCliSlugsFromLabel(c.label);
+            const matchedAgySlug = candidateSlugs.find((s) => agySlugSet.has(s)) || candidateSlugs[0] || String(c.modelOrAlias?.model || c.label || '').toLowerCase();
+            const qi = c.quotaInfo || {};
+            const frac = typeof qi.remainingFraction === 'number' ? qi.remainingFraction : 1;
+            const entryObj = {
+                displayName: c.label || matchedAgySlug,
+                model: c.modelOrAlias?.model || null,
+                quotaInfo: {
+                    remainingFraction: frac,
+                    resetTime: qi.resetTime || null,
+                },
+                recommended: Boolean(c.isRecommended),
+                supportsImages: c.supportsImages !== false,
+                supportsThinking: /thinking|argon|hydrogen|opus/i.test(c.label || ''),
+                tagTitle: c.tagTitle || '',
+                tagDescription: c.tagDescription || '',
+            };
+            for (const slug of candidateSlugs) {
+                rawModelsMap[slug] = entryObj;
             }
+            rawModelsMap[matchedAgySlug] = entryObj;
+            models.push({
+                modelId: matchedAgySlug,
+                displayName: c.label || matchedAgySlug,
+                remainingFraction: frac,
+                resetTime: qi.resetTime || null,
+                recommended: Boolean(c.isRecommended),
+                supportsImages: c.supportsImages !== false,
+                supportsThinking: entryObj.supportsThinking,
+                tagTitle: c.tagTitle || '',
+                tagDescription: c.tagDescription || '',
+                modelPlaceholder: c.modelOrAlias?.model || null,
+            });
+        }
+    } else if (agyModels.length > 0) {
+        for (const m of agyModels) {
+            rawModelsMap[m.id] = {
+                displayName: m.label || m.id,
+                quotaInfo: { remainingFraction: 1, resetTime: null },
+                recommended: Boolean(m.isDefault),
+                supportsImages: true,
+            };
+            models.push({
+                modelId: m.id,
+                displayName: m.label || m.id,
+                remainingFraction: 1,
+                resetTime: null,
+                recommended: Boolean(m.isDefault),
+                supportsImages: true,
+                supportsThinking: true,
+                tagTitle: '',
+                tagDescription: '',
+                modelPlaceholder: null,
+            });
         }
     }
-
-    const accessToken = raw.token?.access_token || raw.access_token;
-    if (!accessToken) {
-        throw new Error(`账号 "${alias}" 缺少可用 access_token`);
-    }
-
-    const reqHeaders = {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'antigravity/1.15.8 linux/amd64',
-    };
-
-    const [modelsResult, lcaResult] = await Promise.allSettled([
-        httpsJsonRequest(CLOUDCODE_MODELS_URL, {
-            method: 'POST',
-            headers: reqHeaders,
-            body: JSON.stringify({}),
-            timeoutMs: 12000,
-        }),
-        httpsJsonRequest(CLOUDCODE_LOAD_ASSIST_URL, {
-            method: 'POST',
-            headers: reqHeaders,
-            body: JSON.stringify({ metadata: { ideType: 'ANTIGRAVITY' } }),
-            timeoutMs: 12000,
-        }),
-    ]);
-
-    const modelsResp = modelsResult.status === 'fulfilled' ? modelsResult.value : null;
-    if (!modelsResp) {
-        throw modelsResult.reason || new Error('获取 CloudCode 模型失败');
-    }
-    const lcaData = lcaResult.status === 'fulfilled' ? lcaResult.value?.data || null : null;
-
-    const rawModelsMap = modelsResp.data?.models && typeof modelsResp.data.models === 'object' ? modelsResp.data.models : {};
-    const filteredEntries = Object.entries(rawModelsMap).filter(([id, info]) => !isInternalOrNoiseModel(id, info));
-
-    const models = filteredEntries.map(([id, info]) => {
-        const qi = info?.quotaInfo || {};
-        const frac = typeof qi.remainingFraction === 'number' ? qi.remainingFraction : null;
-        return {
-            modelId: id,
-            displayName: info?.displayName || id,
-            remainingFraction: frac,
-            resetTime: qi.resetTime || null,
-            recommended: !!info?.recommended,
-            supportsImages: !!info?.supportsImages,
-            supportsThinking: !!info?.supportsThinking,
-            tagTitle: info?.tagTitle || '',
-            tagDescription: info?.tagDescription || '',
-            modelPlaceholder: info?.model || null,
-        };
-    });
 
     const pools = buildQuotaPools(models);
     const withQuota = models.filter((m) => typeof m.remainingFraction === 'number');
@@ -1035,14 +1283,18 @@ async function fetchAccountQuota(alias, opts = {}) {
     const exhaustedCount = withQuota.filter((m) => m.remainingFraction <= 0.01).length;
 
     const tierInfo = classifyAccountTier({
-        loadCodeAssist: lcaData,
+        userStatus,
         modelsMap: rawModelsMap,
+        agyModels,
     });
 
+    const resolvedAlias = isDirectActive
+        ? (listOAuthAccounts(opts).activeAlias || meta.name || meta.email?.split('@')[0] || 'active')
+        : found.cleanAlias;
     const cacheKey = isDirectActive ? '__active__' : found.cleanAlias;
     const summary = {
-        alias: isDirectActive ? (meta.name || meta.email?.split('@')[0] || 'active') : found.cleanAlias,
-        email: meta.email,
+        alias: resolvedAlias,
+        email: meta.email || userStatus?.email || null,
         fetchedAt: new Date().toISOString(),
         avgQuota,
         minQuota,
@@ -1053,9 +1305,15 @@ async function fetchAccountQuota(alias, opts = {}) {
         tierInfo,
         pools,
         models,
+        source: official?.source || 'agy-cli',
     };
-    quotaCache.set(cacheKey, { ...summary, rawModelsMap });
-    return opts.includeRaw ? { ...summary, rawModelsMap } : summary;
+    const fullEntry = { ...summary, rawModelsMap };
+    quotaCache.set(cacheKey, fullEntry);
+    if (resolvedAlias && resolvedAlias !== 'active') {
+        quotaCache.set(resolvedAlias, fullEntry);
+    }
+    savePersistedQuotaCache(paths);
+    return opts.includeRaw ? fullEntry : summary;
 }
 
 function formatCachedQuota(cached, includeRaw) {
@@ -1099,17 +1357,6 @@ async function getActiveAccountQuotaSummary({ forceRefresh = false, includeRaw =
     } catch {
         return formatCachedQuota(cached, includeRaw);
     }
-}
-
-async function warmAllAccountQuotas(opts = {}) {
-    const paths = resolvePaths(opts);
-    const accounts = listAccountFiles(paths);
-    await Promise.allSettled(accounts.map((acc) => {
-        const cached = quotaCache.get(acc.alias);
-        const ageMs = cached ? (Date.now() - Date.parse(cached.fetchedAt || 0)) : Infinity;
-        if (cached && ageMs < 600000) return Promise.resolve(cached);
-        return fetchAccountQuota(acc.alias, { ...opts, includeRaw: true });
-    }));
 }
 
 async function rotateOAuthAccount(opts = {}) {
@@ -1367,7 +1614,8 @@ module.exports = {
     classifyAccountTier,
     isInternalOrNoiseModel,
     buildQuotaPools,
-    warmAllAccountQuotas,
+    probeOfficialLanguageServer,
+    deriveCliSlugsFromLabel,
     rotateOAuthAccount,
     startWebOAuthFlow,
     completeWebOAuthFlow,

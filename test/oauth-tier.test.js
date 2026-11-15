@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { classifyAccountTier, buildQuotaPools } = require('../src/oauth-accounts');
+const { classifyAccountTier, buildQuotaPools, deriveCliSlugsFromLabel } = require('../src/oauth-accounts');
 const { buildCliFallbackModels } = require('../src/routes/conversations');
 
 let passed = 0;
@@ -136,16 +136,21 @@ async function runTest(name, fn) {
         assert.strictEqual(poolById.claude.resetTime, '2026-11-15T19:12:06Z');
     });
 
-    await runTest('buildQuotaPools splits Gemini Pro and Gemini Flash when their remainingFraction differs', () => {
+    await runTest('buildQuotaPools splits Gemini Argon/Pro, Gemini Hydrogen/Flash, and Claude into 3 pools when fractions differ', () => {
         const pools = buildQuotaPools([
-            { modelId: 'gemini-3.1-pro-high', remainingFraction: 0.15, resetTime: '2026-11-15T16:13:31Z' },
-            { modelId: 'gemini-3.8-flash-high', remainingFraction: 0.85, resetTime: '2026-11-15T18:00:00Z' },
-            { modelId: 'claude-opus-5-5-thinking', remainingFraction: 1.0, resetTime: '2026-11-15T19:37:47Z' },
+            { modelId: 'gemini-4-argon-high', displayName: 'Gemini 4 Argon (High)', remainingFraction: 0.7028, resetTime: '2026-11-22T11:49:49Z' },
+            { modelId: 'gemini-pro-orchestrator-g1-pro', displayName: 'Orchestrator (Argon)', remainingFraction: 0.7028, resetTime: '2026-11-22T11:49:49Z' },
+            { modelId: 'gemini-4-hydrogen-high', displayName: 'Gemini 4 Hydrogen (High)', remainingFraction: 0.1278, resetTime: '2026-11-15T16:13:31Z' },
+            { modelId: 'claude-opus-5-5-thinking', displayName: 'Claude Opus 5.5 (Thinking)', remainingFraction: 1.0, resetTime: '2026-11-15T19:37:47Z' },
         ]);
         const poolById = Object.fromEntries(pools.map((p) => [p.id, p]));
-        assert.strictEqual(poolById['gemini-pro']?.percent, 15);
-        assert.strictEqual(poolById['gemini-flash']?.percent, 85);
+        assert.strictEqual(poolById['gemini-pro']?.percent, 70);
+        assert.strictEqual(poolById['gemini-pro']?.shortLabel, 'Argon');
+        assert.strictEqual(poolById['gemini-flash']?.percent, 13);
+        assert.strictEqual(poolById['gemini-flash']?.shortLabel, 'Hydro');
         assert.strictEqual(poolById.claude?.percent, 100);
+        assert.ok(deriveCliSlugsFromLabel('Orchestrator (Argon)').includes('gemini-pro-orchestrator-g1-pro'));
+        assert.ok(deriveCliSlugsFromLabel('Claude Opus 5.5 (Thinking)').includes('claude-opus-5-5'));
     });
 
     console.log(`\nResults: ${passed} passed, ${failed} failed\n`);

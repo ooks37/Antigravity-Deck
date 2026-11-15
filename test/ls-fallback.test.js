@@ -139,10 +139,14 @@ async function main() {
             assert.ok(rules.memories.some((m) => m.title === 'GEMINI' && m.scope === 'global'));
 
             const wfBefore = await fb.handleLsFallback('GetAllWorkflows', {});
-            assert.strictEqual(wfBefore.workflows.length, 1);
-            assert.strictEqual(wfBefore.workflows[0].turbo, true);
+            assert.ok(wfBefore.workflows.length >= 2);
+            const deployWf = wfBefore.workflows.find((w) => w.name === 'deploy');
+            assert.ok(deployWf, 'Expected deploy workflow');
+            assert.strictEqual(deployWf.turbo, true);
+            assert.ok(wfBefore.workflows.some((w) => w.name === 'plan' && w.isBuiltin), 'Expected built-in /plan CLI workflow');
+            assert.ok(wfBefore.workflows.some((w) => w.name === 'run-workflow'), 'Expected mapped run-workflow skill');
 
-            const copied = await fb.handleLsFallback('CopyBuiltinWorkflowToWorkspace', { workflow: wfBefore.workflows[0] });
+            const copied = await fb.handleLsFallback('CopyBuiltinWorkflowToWorkspace', { workflow: deployWf });
             assert.strictEqual(copied.ok, true);
             assert.ok(fs.existsSync(path.join(projectDir, '.agent', 'workflows', 'deploy.md')));
         });

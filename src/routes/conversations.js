@@ -60,9 +60,9 @@ function matchCloudCodeWithMeta(modelSlug, rawModelsMap) {
     }
 
     // Newer CLI models (e.g. gemini-4-argon-*, gemini-4-hydrogen-*, gemini-pro-orchestrator-*)
-    // match their corresponding Pro or Flash quota pool before falling back across Gemini.
+    // match their corresponding Pro/Argon or Flash/Hydrogen quota pool before falling back across Gemini.
     if (lower.startsWith('gemini-')) {
-        const isPro = /pro|argon|hydrogen|orchestrator/i.test(lower) && !/flash/i.test(lower);
+        const isPro = /pro|argon|orchestrator/i.test(lower) && !/flash|hydrogen/i.test(lower);
         const fallbackKeys = isPro ? GEMINI_PRO_FALLBACK_KEYS : GEMINI_FLASH_FALLBACK_KEYS;
         for (const key of fallbackKeys) {
             if (rawModelsMap[key]?.quotaInfo) return { entry: rawModelsMap[key], exact: false };

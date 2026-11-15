@@ -342,12 +342,11 @@ server.listen(PORT, async () => {
     console.log('  🪶 Lightweight CLI mode active (IDE hub & background LS pollers disabled)');
   }
 
-  // Non-blocking warmup so first /api/models and /api/accounts/oauth responses are served from warm cache
+  // Non-blocking warmup for the single active account via local agy CLI / language_server
   setTimeout(() => {
     Promise.allSettled([
       require('./src/agy-manager').getAgyModels().catch(() => {}),
       require('./src/oauth-accounts').getActiveAccountQuotaSummary({ includeRaw: true }).catch(() => {}),
-      require('./src/oauth-accounts').warmAllAccountQuotas().catch(() => {}),
     ]);
   }, 250).unref();
 

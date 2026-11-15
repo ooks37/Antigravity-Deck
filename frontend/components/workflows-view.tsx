@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { lsCall } from '@/lib/cascade-api';
-import { Workflow, Activity, AlertTriangle, Loader2, BookOpen, ScrollText, FolderOpen, Copy } from 'lucide-react';
+import { Workflow, Activity, AlertTriangle, Loader2, BookOpen, ScrollText, FolderOpen, Copy, ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -208,19 +208,51 @@ function SpecList({
     copyingPath?: string | null;
     copyErrors?: Record<string, string>;
 }) {
+    const [expandedKey, setExpandedKey] = useState<string | null>(null);
+    const [copiedSlash, setCopiedSlash] = useState<string | null>(null);
+
+    const handleCopySlash = (e: React.MouseEvent, slash: string) => {
+        e.stopPropagation();
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+            navigator.clipboard.writeText(`${slash} `).catch(() => {});
+            setCopiedSlash(slash);
+            setTimeout(() => setCopiedSlash((prev) => (prev === slash ? null : prev)), 1500);
+        }
+    };
+
     return (
         <ListTable columnLabel={columnLabel}>
             {items.map((w, i) => {
                 const key = w.path ?? w.name ?? String(i);
                 const isCopying = copyingPath === key;
                 const copyErr = copyErrors?.[key];
+                const isExpanded = expandedKey === key;
+                const rawName = workflowName(w);
+                const slashCmd = rawName.startsWith('/') ? rawName : `/${rawName}`;
+                const hasContent = typeof w.content === 'string' && w.content.trim().length > 0;
                 return (
                     <div key={key}>
-                        <div className="grid grid-cols-[1fr_auto] items-start gap-3 px-4 py-3 hover:bg-muted/20 transition-colors">
+                        <div
+                            onClick={() => hasContent && setExpandedKey(isExpanded ? null : key)}
+                            className={`grid grid-cols-[1fr_auto] items-start gap-3 px-4 py-3 hover:bg-muted/20 transition-colors ${hasContent ? 'cursor-pointer' : ''}`}
+                        >
                             <div className="flex flex-col gap-0.5 min-w-0">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    {(() => { const Icon = icon; return <Icon className={`w-3.5 h-3.5 shrink-0 ${iconColor}`} />; })()}
-                                    <span className="text-sm font-medium truncate">{workflowName(w)}</span>
+                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                    {hasContent ? (
+                                        isExpanded ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                                    ) : (
+                                        (() => { const Icon = icon; return <Icon className={`w-3.5 h-3.5 shrink-0 ${iconColor}`} />; })()
+                                    )}
+                                    <span className="text-sm font-medium truncate">{rawName}</span>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleCopySlash(e, slashCmd)}
+                                        title="点击复制对话斜杠调用指令"
+                                        className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+                                    >
+                                        {copiedSlash === slashCmd ? <Check className="w-2.5 h-2.5" /> : null}
+                                        {slashCmd}
+                                    </button>
                                     {w.isBuiltin && builtinBadge}
                                     {showTurbo && w.turbo && (
                                         <span className="text-[9px] font-medium text-amber-400/70 bg-amber-500/10 px-1 py-0.5 rounded shrink-0">
@@ -235,7 +267,7 @@ function SpecList({
                                     <p className="text-[10px] text-muted-foreground/40 pl-6 font-mono truncate">插件: {w.pluginName as string}</p>
                                 )}
                             </div>
-                            <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                            <div className="flex items-center gap-2 shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
                                 {onCopy && w.isBuiltin && (
                                     <button
                                         onClick={() => onCopy(w)}
@@ -257,6 +289,18 @@ function SpecList({
                                 )}
                             </div>
                         </div>
+                        {isExpanded && hasContent && (
+                            <div className="px-4 pb-3 pt-1 bg-muted/10 border-t border-border/20 space-y-1.5">
+                                {w.path && (
+                                    <p className="text-[10px] text-muted-foreground/50 font-mono break-all">
+                                        映射路径: {w.path}
+                                    </p>
+                                )}
+                                <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-72 overflow-y-auto rounded-lg bg-background/80 border border-border/40 p-3">
+                                    {w.content}
+                                </pre>
+                            </div>
+                        )}
                         {copyErr && (
                             <div className="px-4 pb-2 -mt-1">
                                 <p className="text-[10px] text-red-400/80 font-mono bg-red-500/5 border border-red-500/10 rounded px-2 py-1 break-all">

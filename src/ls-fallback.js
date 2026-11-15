@@ -11,6 +11,91 @@ const { pathToFileUri, uriToFsPath } = require('./routes/route-helpers');
 const WORKSPACE_MARKERS = ['.git', '.agent', '.agents', 'AGENTS.md', 'GEMINI.md'];
 const SKIP_SCAN_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.cache', 'logs', 'data']);
 
+/** Official agy CLI built-in slash workflows mapped directly to agy execution. */
+const BUILTIN_CLI_WORKFLOWS = [
+    {
+        path: 'builtin://agy-cli/plan.md',
+        name: 'plan',
+        description: '复杂任务分步规划工作流：在动手修改前先梳理架构、边界与分步执行计划',
+        content: '---\nname: plan\ndescription: 复杂任务分步规划工作流：在动手修改前先梳理架构、边界与分步执行计划\n---\n\n# /plan — 分步规划工作流\n\n1. 梳理当前需求、代码上下文与影响边界\n2. 列出结构化分步实施计划与验证标准\n3. 确认计划后按步骤推进并校验结果\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/boost.md',
+        name: 'boost',
+        description: '深度思考与多视角严密验证工作流：适合复杂编码、架构设计或疑难排错',
+        content: '---\nname: boost\ndescription: 深度思考与多视角严密验证工作流：适合复杂编码、架构设计或疑难排错\n---\n\n# /boost — 深度推理与多视角验证工作流\n\n开启深度思考、多方案对比分析与端到端严格验证。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/goal.md',
+        name: 'goal',
+        description: '长周期自主目标工作流：持续推进并闭环验证，直至目标完全达成',
+        content: '---\nname: goal\ndescription: 长周期自主目标工作流：持续推进并闭环验证，直至目标完全达成\nturbo: true\n---\n\n# /goal — 自主目标达成工作流\n\n围绕目标持续迭代执行、自检与修复，直至所有验收标准全部通过。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: true,
+    },
+    {
+        path: 'builtin://agy-cli/teamwork.md',
+        name: 'teamwork',
+        description: '多智能体协同工作流（Swarm）：拆分独立子任务并行推进与交叉审查',
+        content: '---\nname: teamwork\ndescription: 多智能体协同工作流（Swarm）：拆分独立子任务并行推进与交叉审查\n---\n\n# /teamwork — 多 Agent 团队协作工作流\n\n将大型项目拆分为并行子模块，通过多智能体协同完成并汇总验证。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/grill-me.md',
+        name: 'grill-me',
+        description: '交互式设计拷问工作流：通过高密度追问帮你理清方案死角与边界条件',
+        content: '---\nname: grill-me\ndescription: 交互式设计拷问工作流：通过高密度追问帮你理清方案死角与边界条件\n---\n\n# /grill-me — 方案压力测试工作流\n\n针对当前设计或计划进行追问，逐一消解模糊假设与潜在风险。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/compact.md',
+        name: 'compact',
+        description: '上下文受控压缩工作流：汇总沉淀关键进展并释放长对话上下文空间',
+        content: '---\nname: compact\ndescription: 上下文受控压缩工作流：汇总沉淀关键进展并释放长对话上下文空间\n---\n\n# /compact — 上下文受控压缩\n\n将当前长会话的关键决策与代码状态整理为结构化摘要。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/schedule.md',
+        name: 'schedule',
+        description: '定时与周期任务工作流：创建一次性计时器或 Cron 周期执行计划',
+        content: '---\nname: schedule\ndescription: 定时与周期任务工作流：创建一次性计时器或 Cron 周期执行计划\n---\n\n# /schedule — 定时调度工作流\n\n配置一次性延时触发或 Cron 周期执行的自动化任务。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/learn.md',
+        name: 'learn',
+        description: '经验沉淀工作流：将本次排错或架构规范提炼固化为可复用的技能或规则',
+        content: '---\nname: learn\ndescription: 经验沉淀工作流：将本次排错或架构规范提炼固化为可复用的技能或规则\n---\n\n# /learn — 知识与技能沉淀工作流\n\n将对话中验证有效的排错流程、配置约定沉淀到工作区或全局技能库。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+    {
+        path: 'builtin://agy-cli/browser.md',
+        name: 'browser',
+        description: '网页检索与浏览器交互工作流：执行线上页面检查、搜索与自动化操作',
+        content: '---\nname: browser\ndescription: 网页检索与浏览器交互工作流：执行线上页面检查、搜索与自动化操作\n---\n\n# /browser — 浏览器交互工作流\n\n结合网页搜索与浏览器工具完成在线验证与交互任务。\n',
+        isBuiltin: true,
+        scope: 'builtin',
+        turbo: false,
+    },
+];
+
 /** Parse simple YAML frontmatter (`--- ... ---`) plus first heading fallback. */
 function parseFrontmatter(content) {
     const raw = String(content || '');
@@ -360,23 +445,47 @@ function createLsFallback(deps = {}) {
         const candidates = [];
 
         for (const ws of wsDirs) {
-            candidates.push(...scanMarkdownFiles(path.join(ws, '.agent', 'workflows'), { scope: 'workspace', isBuiltin: false }));
-            candidates.push(...scanMarkdownFiles(path.join(ws, '.agents', 'workflows'), { scope: 'workspace', isBuiltin: false }));
+            for (const dirName of ['.agent', '.agents', '_agent', '_agents']) {
+                candidates.push(...scanMarkdownFiles(path.join(ws, dirName, 'workflows'), { scope: 'workspace', isBuiltin: false }));
+            }
         }
+        candidates.push(...scanMarkdownFiles(path.join(homeDir, '.gemini', 'config', 'workflows'), { scope: 'global', isBuiltin: false }));
+        candidates.push(...scanMarkdownFiles(path.join(homeDir, '.gemini', 'config', 'global_workflows'), { scope: 'global', isBuiltin: false }));
         candidates.push(...scanMarkdownFiles(path.join(homeDir, '.gemini', 'antigravity', 'global_workflows'), { scope: 'global', isBuiltin: false }));
         candidates.push(...scanMarkdownFiles(path.join(homeDir, '.gemini', 'antigravity-cli', 'global_workflows'), { scope: 'global', isBuiltin: false }));
         candidates.push(...scanMarkdownFiles(path.join(homeDir, '.gemini', 'antigravity-cli', 'builtin', 'workflows'), { scope: 'builtin', isBuiltin: true }));
         candidates.push(...scanMarkdownFiles(path.join(homeDir, '.gemini', 'antigravity', 'builtin', 'workflows'), { scope: 'builtin', isBuiltin: true }));
 
+        // Map Antigravity 2.0 workflow orchestration skills (run-workflow, migrate-workflows, automation, native_swarm)
+        try {
+            const { skills } = getAllSkills(body);
+            for (const s of skills) {
+                if (/workflow|automation|swarm|plan|executing-plans|writing-plans/i.test(s.name || '')) {
+                    candidates.push({
+                        path: s.path,
+                        name: s.name,
+                        description: s.description,
+                        content: s.content || '',
+                        isBuiltin: Boolean(s.isBuiltin),
+                        scope: s.scope || 'builtin',
+                    });
+                }
+            }
+        } catch { /* ignore */ }
+
+        // Map official agy CLI built-in slash workflows (/plan, /boost, /goal, /teamwork, etc.)
+        candidates.push(...BUILTIN_CLI_WORKFLOWS);
+
         const seenPaths = new Set();
-        const seenBuiltinNames = new Set();
+        const seenNames = new Set();
         const workflows = [];
         for (const item of candidates) {
-            const keyPath = realpathOrResolve(item.path);
+            const isVirtual = String(item.path || '').startsWith('builtin://');
+            const keyPath = isVirtual ? item.path : realpathOrResolve(item.path);
             if (seenPaths.has(keyPath)) continue;
-            if (item.isBuiltin && seenBuiltinNames.has(item.name)) continue;
+            if (item.isBuiltin && seenNames.has(item.name)) continue;
             seenPaths.add(keyPath);
-            if (item.isBuiltin) seenBuiltinNames.add(item.name);
+            seenNames.add(item.name);
             workflows.push(item);
         }
         return { workflows };
@@ -405,7 +514,7 @@ function createLsFallback(deps = {}) {
         }
 
         let content = typeof workflow.content === 'string' ? workflow.content : '';
-        if (!content && typeof workflow.path === 'string') {
+        if (!content && typeof workflow.path === 'string' && !workflow.path.startsWith('builtin://')) {
             const builtinRoots = [
                 path.join(homeDir, '.gemini', 'antigravity-cli', 'builtin'),
                 path.join(homeDir, '.gemini', 'antigravity', 'builtin'),
@@ -415,6 +524,10 @@ function createLsFallback(deps = {}) {
             if (allowed && fs.existsSync(srcPath)) {
                 content = fs.readFileSync(srcPath, 'utf-8');
             }
+        }
+        if (!content) {
+            const builtinMatch = BUILTIN_CLI_WORKFLOWS.find((w) => w.name === rawName || w.path === workflow.path);
+            if (builtinMatch) content = builtinMatch.content;
         }
         if (!content) {
             const err = new Error('Workflow content unavailable');
@@ -447,6 +560,7 @@ function createLsFallback(deps = {}) {
                         baseDir: skillDir,
                         name: fm.name || entry.name,
                         description: fm.description || '',
+                        content,
                         isBuiltin: Boolean(isBuiltin),
                         scope,
                         ...(pluginName ? { pluginName } : {}),
@@ -479,9 +593,11 @@ function createLsFallback(deps = {}) {
         const candidates = [];
 
         for (const ws of wsDirs) {
-            candidates.push(...scanSkillsDir(path.join(ws, '.agent', 'skills'), { scope: 'workspace', isBuiltin: false }));
-            candidates.push(...scanSkillsDir(path.join(ws, '.agents', 'skills'), { scope: 'workspace', isBuiltin: false }));
+            for (const dirName of ['.agent', '.agents', '_agent', '_agents']) {
+                candidates.push(...scanSkillsDir(path.join(ws, dirName, 'skills'), { scope: 'workspace', isBuiltin: false }));
+            }
         }
+        candidates.push(...scanSkillsDir(path.join(homeDir, '.gemini', 'config', 'skills'), { scope: 'global', isBuiltin: false }));
         candidates.push(...scanSkillsDir(path.join(homeDir, '.gemini', 'skills'), { scope: 'global', isBuiltin: false }));
         candidates.push(...scanSkillsDir(path.join(homeDir, '.agents', 'skills'), { scope: 'global', isBuiltin: false }));
         candidates.push(...scanSkillsDir(path.join(homeDir, '.gemini', 'antigravity', 'skills'), { scope: 'global', isBuiltin: false }));
@@ -547,17 +663,45 @@ function createLsFallback(deps = {}) {
                 const r = readRuleFile(path.join(ws, fileName), 'workspace', '工作区');
                 if (r) candidates.push(r);
             }
-            candidates.push(...scanRuleDir(path.join(ws, '.agent', 'rules'), 'workspace', '工作区规则'));
-            candidates.push(...scanRuleDir(path.join(ws, '.agents', 'rules'), 'workspace', '工作区规则'));
+            for (const dirName of ['.agent', '.agents', '_agent', '_agents']) {
+                candidates.push(...scanRuleDir(path.join(ws, dirName, 'rules'), 'workspace', '工作区规则'));
+            }
         }
 
         for (const fileName of ['AGENTS.md', 'GEMINI.md']) {
-            const r = readRuleFile(path.join(homeDir, '.gemini', fileName), 'global', '全局');
-            if (r) candidates.push(r);
+            const rHome = readRuleFile(path.join(homeDir, fileName), 'global', '用户目录');
+            if (rHome) candidates.push(rHome);
+            const rGem = readRuleFile(path.join(homeDir, '.gemini', fileName), 'global', '全局');
+            if (rGem) candidates.push(rGem);
+            const rCfg = readRuleFile(path.join(homeDir, '.gemini', 'config', fileName), 'global', '全局配置');
+            if (rCfg) candidates.push(rCfg);
         }
+        candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'config', 'rules'), 'global', '全局规则'));
         candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'antigravity', 'rules'), 'global', '全局规则'));
         candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'antigravity-cli', 'rules'), 'global', '全局规则'));
         candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'antigravity', 'memories'), 'global', '全局记忆'));
+        candidates.push(...scanRuleDir(path.join(homeDir, '.gemini', 'antigravity-cli', 'memories'), 'global', '全局记忆'));
+
+        // Also surface ~/.gemini/config/settings.json if it defines agent execution/permission rules
+        const cliSettingsPath = path.join(homeDir, '.gemini', 'config', 'settings.json');
+        const cliSettings = readJsonSafe(cliSettingsPath);
+        if (cliSettings && typeof cliSettings === 'object' && (cliSettings.agentMode || cliSettings.toolPermission || cliSettings.permissions)) {
+            candidates.push({
+                memoryId: cliSettingsPath,
+                title: 'settings.json (CLI 全局执行与权限规则)',
+                scope: 'global',
+                source: 'CLI 配置',
+                textMemory: JSON.stringify({
+                    agentMode: cliSettings.agentMode || 'default',
+                    toolPermission: cliSettings.toolPermission || 'always-proceed',
+                    artifactReviewPolicy: cliSettings.artifactReviewPolicy || 'agent-decides',
+                    terminalAutoExecutionPolicy: cliSettings.terminalAutoExecutionPolicy || 'auto',
+                    allowNonWorkspaceAccess: cliSettings.allowNonWorkspaceAccess !== false,
+                    permissions: cliSettings.permissions || {},
+                }, null, 2),
+                absolutePath: cliSettingsPath,
+            });
+        }
 
         const seen = new Set();
         const memories = [];
@@ -754,4 +898,5 @@ module.exports = {
     discoverWorkspaces: defaultInstance.discoverWorkspaces,
     resolveWorkspacePathByName: defaultInstance.resolveWorkspacePathByName,
     parseFrontmatter,
+    BUILTIN_CLI_WORKFLOWS,
 };
