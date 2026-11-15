@@ -171,7 +171,7 @@ export function QuotaPoolsPill({
                                     pct > 50 ? 'bg-emerald-400' : pct > 15 ? 'bg-amber-400' : 'bg-rose-400'
                                 )}
                             />
-                            <span className="text-[10px] text-muted-foreground font-normal">{pool.shortLabel || pool.label}</span>
+                            <span className="text-[10px] text-muted-foreground font-normal">{pool.label}</span>
                             <span
                                 className={cn(
                                     'font-mono text-[10px] font-semibold',
