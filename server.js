@@ -341,6 +341,14 @@ server.listen(PORT, async () => {
     console.log('  🪶 Lightweight CLI mode active (IDE hub & background LS pollers disabled)');
   }
 
+  // Non-blocking warmup so first /api/models response is served from warm cache
+  setTimeout(() => {
+    Promise.allSettled([
+      require('./src/agy-manager').getAgyModels().catch(() => {}),
+      require('./src/oauth-accounts').getActiveAccountQuotaSummary({ includeRaw: true }).catch(() => {}),
+    ]);
+  }, 250).unref();
+
   // Auto-start Agent Bridge if configured in settings.json
   const { getSettings } = require('./src/config');
   const bridgeCfg = getSettings().agentBridge || {};

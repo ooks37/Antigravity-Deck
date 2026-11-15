@@ -21,6 +21,7 @@ const DEFAULT_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 
 const pendingOAuthFlows = new Map(); // state -> { codeVerifier, redirectUri, createdAt }
 const quotaCache = new Map(); // alias -> { fetchedAt, ... }
+const quotaInFlight = new Map(); // alias -> Promise<summary>
 
 function resolvePaths(opts = {}) {
     const homeDir = opts.homeDir || os.homedir();
@@ -719,6 +720,7 @@ async function useOAuthAccount(targetAlias, opts = {}) {
         require('./agy-manager').invalidateModelsCache();
     } catch { /* ignore in isolated unit tests */ }
     quotaCache.delete(found.cleanAlias);
+    quotaInFlight.delete(found.cleanAlias);
 
     let hubReloaded = false;
     if (opts.reloadHub) {
@@ -947,23 +949,45 @@ async function fetchAccountQuota(alias, opts = {}) {
     return opts.includeRaw ? { ...summary, rawModelsMap } : summary;
 }
 
+function formatCachedQuota(cached, includeRaw) {
+    if (!cached) return null;
+    if (includeRaw) return cached;
+    const { rawModelsMap: _raw, ...clean } = cached;
+    return clean;
+}
+
 async function getActiveAccountQuotaSummary({ forceRefresh = false, includeRaw = true } = {}, opts = {}) {
     const overview = listOAuthAccounts(opts);
     const activeAcc = (overview.accounts || []).find((a) => a.isActive);
     if (!activeAcc) return null;
     const cached = !forceRefresh ? quotaCache.get(activeAcc.alias) : null;
-    if (cached && Date.now() - Date.parse(cached.fetchedAt || 0) < 60000) {
-        if (includeRaw) return cached;
-        const { rawModelsMap: _raw, ...clean } = cached;
-        return clean;
+    const ageMs = cached ? (Date.now() - Date.parse(cached.fetchedAt || 0)) : Infinity;
+    const runRefresh = () => {
+        const canCoalesce = !opts || Object.keys(opts).length === 0;
+        if (canCoalesce && quotaInFlight.has(activeAcc.alias)) {
+            return quotaInFlight.get(activeAcc.alias);
+        }
+        const p = fetchAccountQuota(activeAcc.alias, { ...opts, includeRaw: true })
+            .finally(() => { if (canCoalesce) quotaInFlight.delete(activeAcc.alias); });
+        if (canCoalesce) quotaInFlight.set(activeAcc.alias, p);
+        return p;
+    };
+
+    if (cached && Number.isFinite(ageMs)) {
+        if (ageMs < 60000) {
+            return formatCachedQuota(cached, includeRaw);
+        }
+        // Serve stale quota up to 30 min immediately while refreshing in the background
+        if (ageMs < 1800000) {
+            runRefresh().catch(() => {});
+            return formatCachedQuota(cached, includeRaw);
+        }
     }
     try {
-        return await fetchAccountQuota(activeAcc.alias, { ...opts, includeRaw });
+        const fresh = await runRefresh();
+        return formatCachedQuota(fresh, includeRaw);
     } catch {
-        if (!cached) return null;
-        if (includeRaw) return cached;
-        const { rawModelsMap: _raw, ...clean } = cached;
-        return clean;
+        return formatCachedQuota(cached, includeRaw);
     }
 }
 

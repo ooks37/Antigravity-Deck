@@ -163,6 +163,8 @@ function createAgyManager(deps = {}) {
     let cachedStatus = null;
     let cachedModels = null;
     let cachedModelsAt = 0;
+    let modelsEpoch = 0;
+    let modelsRefreshPromise = null;
 
     function isExecutableFile(filePath) {
         if (!filePath || typeof filePath !== 'string' || filePath.includes('\0')) return false;
@@ -417,6 +419,8 @@ function createAgyManager(deps = {}) {
     function invalidateModelsCache() {
         cachedModels = null;
         cachedModelsAt = 0;
+        modelsEpoch += 1;
+        modelsRefreshPromise = null;
     }
 
     async function resolveAgyModelId(model, modelLabel, effort = null) {
@@ -533,24 +537,47 @@ function createAgyManager(deps = {}) {
         }
     }
 
-    async function getAgyModels({ force = false } = {}) {
-        if (!force && cachedModels && (Date.now() - cachedModelsAt) < 300000) {
-            return { statusCode: 200, success: true, ...cachedModels };
-        }
-        const binary = await findAgyBinary();
-        if (!binary.found) {
-            return { statusCode: 404, success: false, error: binary.error, models: [] };
-        }
+    async function refreshAgyModelsLocked() {
+        if (modelsRefreshPromise) return modelsRefreshPromise;
+        const epochAtStart = modelsEpoch;
+        modelsRefreshPromise = (async () => {
+            const binary = await findAgyBinary();
+            if (!binary.found) {
+                return { statusCode: 404, success: false, error: binary.error, models: [] };
+            }
+            try {
+                const { stdout } = await runAgy(binary.path, ['models'], 10000);
+                const raw = String(stdout || '').trim();
+                const models = parseAgyModels(raw);
+                if (epochAtStart === modelsEpoch) {
+                    cachedModels = { raw, models };
+                    cachedModelsAt = Date.now();
+                }
+                return { statusCode: 200, success: true, raw, models };
+            } catch (err) {
+                return { statusCode: 500, success: false, error: err.message, models: [] };
+            }
+        })();
         try {
-            const { stdout } = await runAgy(binary.path, ['models'], 10000);
-            const raw = String(stdout || '').trim();
-            const models = parseAgyModels(raw);
-            cachedModels = { raw, models };
-            cachedModelsAt = Date.now();
-            return { statusCode: 200, success: true, raw, models };
-        } catch (err) {
-            return { statusCode: 500, success: false, error: err.message, models: [] };
+            return await modelsRefreshPromise;
+        } finally {
+            modelsRefreshPromise = null;
         }
+    }
+
+    async function getAgyModels({ force = false } = {}) {
+        const ageMs = Date.now() - cachedModelsAt;
+        if (!force && cachedModels) {
+            // Fresh within 5 min; stale-while-revalidate up to 12 hours so /api/models never blocks
+            if (ageMs < 300000) {
+                return { statusCode: 200, success: true, ...cachedModels };
+            }
+            if (ageMs < 43200000) {
+                refreshAgyModelsLocked().catch(() => {});
+                return { statusCode: 200, success: true, ...cachedModels };
+            }
+        }
+        return refreshAgyModelsLocked();
     }
 
     function streamAgyPrompt({ prompt, model, modelLabel, effort, conversationId, workspace, timeoutMs = 180000, onSpawn } = {}, onEvent = () => {}) {

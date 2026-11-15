@@ -7,11 +7,10 @@ import { X, FileCode2, ExternalLink, Loader2, Copy, Check } from 'lucide-react';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import dynamic from 'next/dynamic';
-import vscDarkPlus from 'react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus';
 
-// Lazy-load syntax highlighter (heavy)
-const SyntaxHighlighter = dynamic(
-    () => import('react-syntax-highlighter').then(m => m.Prism),
+// Lazy-load heavy Prism syntax highlighter + theme only when a cci:// file preview opens
+const CciCodeViewer = dynamic(
+    () => import('./cci-code-viewer').then(m => ({ default: m.CciCodeViewer })),
     { ssr: false, loading: () => <div className="p-4 text-xs text-muted-foreground/50">加载中…</div> }
 );
 
@@ -139,34 +138,13 @@ function FileViewerModal({ target, onClose }: { target: CciTarget; onClose: () =
                         </div>
                     )}
                     {content && (
-                        <SyntaxHighlighter
-                            language={lang}
-                            style={vscDarkPlus}
-                            showLineNumbers
-                            startingLineNumber={1}
-                            wrapLines
-                            lineProps={(lineNumber: number) => {
-                                const isHighlighted = lineNumber >= lineStart && lineNumber <= lineEnd;
-                                return {
-                                    ref: lineNumber === lineStart ? lineRef : undefined,
-                                    style: {
-                                        display: 'block',
-                                        backgroundColor: isHighlighted ? 'rgba(255,220,100,0.08)' : undefined,
-                                        borderLeft: isHighlighted ? '2px solid rgba(255,220,100,0.5)' : '2px solid transparent',
-                                    },
-                                };
-                            }}
-                            customStyle={{
-                                margin: 0,
-                                borderRadius: 0,
-                                background: 'transparent',
-                                fontSize: '12px',
-                                lineHeight: '1.6',
-                            }}
-                            codeTagProps={{ style: { fontFamily: 'var(--font-mono, monospace)' } }}
-                        >
-                            {content}
-                        </SyntaxHighlighter>
+                        <CciCodeViewer
+                            content={content}
+                            lang={lang}
+                            lineStart={lineStart}
+                            lineEnd={lineEnd}
+                            lineRef={lineRef}
+                        />
                     )}
                 </div>
             </div>
